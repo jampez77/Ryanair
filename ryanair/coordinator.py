@@ -1,0 +1,137 @@
+"""Ryanair Coordinator."""
+from datetime import timedelta
+import logging
+from homeassistant.const import (
+    CONF_EMAIL,
+    CONF_PASSWORD,
+    CONTENT_TYPE_JSON
+)
+
+from homeassistant.helpers.update_coordinator import (
+    DataUpdateCoordinator,
+    UpdateFailed,
+)
+from .const import DOMAIN, HOST, ACCOUNT_LOGIN, CONF_DEVICE_FINGERPRINT, CONF_POLICY_AGREED, MFA_CODE, ACCOUNT_VERIFICATION, DEVICE_VERIFICATION, MFA_TOKEN
+from .errors import RyanairError, InvalidAuth, APIRatelimitExceeded, UnknownError
+from homeassistant.exceptions import ConfigEntryAuthFailed
+
+_LOGGER = logging.getLogger(__name__)
+
+
+class RyanairMfaCoordinator(DataUpdateCoordinator):
+    """MFA coordinator."""
+
+    def __init__(self, hass, session, data):
+        """Initialize coordinator."""
+
+        super().__init__(
+            hass,
+            _LOGGER,
+            # Name of the data. For logging purposes.
+            name="Ryanair",
+            # Polling interval. Will only be polled if there are subscribers.
+            update_interval=timedelta(seconds=21600),
+        )
+
+        self.session = session
+        self.mfaCode = data[MFA_CODE]
+        self.mfaToken = data[MFA_TOKEN]
+        self.fingerprint = data[CONF_DEVICE_FINGERPRINT]
+
+    async def _async_update_data(self):
+        """Fetch data from API endpoint."""
+        try:
+            resp = await self.session.request(
+                method="PUT",
+                url=HOST + ACCOUNT_VERIFICATION + "/" + DEVICE_VERIFICATION,
+                headers={
+                    "Content-Type": CONTENT_TYPE_JSON,
+                    CONF_DEVICE_FINGERPRINT: self.fingerprint,
+                },
+                json={
+                    MFA_CODE: self.mfaCode,
+                    MFA_TOKEN: self.mfaToken
+                },
+            )
+            body = await resp.json()
+            print("MFA Response")
+            print(body)
+
+        except InvalidAuth as err:
+            raise ConfigEntryAuthFailed from err
+        except RyanairError as err:
+            raise UpdateFailed(str(err)) from err
+        except ValueError as err:
+            err_str = str(err)
+
+            if "Invalid authentication credentials" in err_str:
+                raise InvalidAuth from err
+            if "API rate limit exceeded." in err_str:
+                raise APIRatelimitExceeded from err
+
+            _LOGGER.exception("Unexpected exception")
+            raise UnknownError from err
+
+        return body
+
+
+class RyanairCoordinator(DataUpdateCoordinator):
+    """Data coordinator."""
+
+    def __init__(self, hass, session, data):
+        """Initialize coordinator."""
+
+        super().__init__(
+            hass,
+            _LOGGER,
+            # Name of the data. For logging purposes.
+            name="Ryanair",
+            # Polling interval. Will only be polled if there are subscribers.
+            update_interval=timedelta(seconds=21600),
+        )
+
+        self.session = session
+        self.email = data[CONF_EMAIL]
+        self.password = data[CONF_PASSWORD]
+        self.fingerprint = data[CONF_DEVICE_FINGERPRINT]
+
+    async def _async_update_data(self):
+        """Fetch data from API endpoint.
+
+        This is the place to pre-process the data to lookup tables
+        so entities can quickly look up their data.
+        """
+        try:
+            resp = await self.session.request(
+                method="POST",
+                url=HOST + ACCOUNT_LOGIN,
+                headers={
+                    "Content-Type": CONTENT_TYPE_JSON,
+                    CONF_DEVICE_FINGERPRINT: self.fingerprint,
+                },
+                json={
+                    CONF_EMAIL: self.email,
+                    CONF_PASSWORD: self.password,
+                    CONF_POLICY_AGREED: 'true'
+                },
+            )
+            body = await resp.json()
+            print("Login Response")
+            print(body)
+
+        except InvalidAuth as err:
+            raise ConfigEntryAuthFailed from err
+        except RyanairError as err:
+            raise UpdateFailed(str(err)) from err
+        except ValueError as err:
+            err_str = str(err)
+
+            if "Invalid authentication credentials" in err_str:
+                raise InvalidAuth from err
+            if "API rate limit exceeded." in err_str:
+                raise APIRatelimitExceeded from err
+
+            _LOGGER.exception("Unexpected exception")
+            raise UnknownError from err
+
+        return body
