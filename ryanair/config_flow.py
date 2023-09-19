@@ -11,7 +11,17 @@ from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.const import CONF_EMAIL, CONF_PASSWORD
-from .const import DOMAIN, CONF_DEVICE_FINGERPRINT, TOKEN, CUSTOMER_ID, CODE_PASSWORD_WRONG, CODE_UNKNOWN_DEVICE, MFA_TOKEN, MFA_CODE, CODE_MFA_CODE_WRONG
+from .const import (
+    DOMAIN,
+    CONF_DEVICE_FINGERPRINT,
+    TOKEN,
+    CUSTOMER_ID,
+    CODE_PASSWORD_WRONG,
+    CODE_UNKNOWN_DEVICE,
+    MFA_TOKEN,
+    MFA_CODE,
+    CODE_MFA_CODE_WRONG,
+)
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from .coordinator import RyanairCoordinator, RyanairMfaCoordinator
 from .errors import CannotConnect, RyanairError
@@ -24,9 +34,11 @@ STEP_USER_DATA_SCHEMA = vol.Schema(
         vol.Required(CONF_PASSWORD): str,
     }
 )
-STEP_MFA = vol.Schema({
-    vol.Required(MFA_CODE): str,
-})
+STEP_MFA = vol.Schema(
+    {
+        vol.Required(MFA_CODE): str,
+    }
+)
 
 
 async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str, Any]:
@@ -50,14 +62,17 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str,
     if "code" in body:
         # Password is wrong, so display message.
         # {"code": "Mfa.Wrong.Code","message": "Mfa wrong code", "additionalData": [{"code": "Mfa.Available.Attempts","message": "4"}]}
-        if body['code'] == CODE_PASSWORD_WRONG:
-            err = body['message'] + " " + \
-                body['additionalData'][0]['message'] + \
-                " retries remaining"
+        if body["code"] == CODE_PASSWORD_WRONG:
+            err = (
+                body["message"]
+                + " "
+                + body["additionalData"][0]["message"]
+                + " retries remaining"
+            )
         # New device, begin MFA process
         # {'code': 'Account.UnknownDeviceFingerprint', 'message': 'Unknown device fingerprint', 'additionalData': [{'code': 'Mfa.Token', 'message': '<MFA_TOKEN>'}]}
-        if body['code'] == CODE_UNKNOWN_DEVICE:
-            responseData = {MFA_TOKEN: body['additionalData'][0]['message']}
+        if body["code"] == CODE_UNKNOWN_DEVICE:
+            responseData = {MFA_TOKEN: body["additionalData"][0]["message"]}
     # Successful Login
     # {"customerId": "<CUSTOMER_ID>","token": "<ACCESS_TOKEN>"}
     if CUSTOMER_ID in body:
@@ -67,7 +82,9 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str,
     return {"title": str(data[CONF_EMAIL]), "data": responseData, "error": err}
 
 
-async def validate_mfa_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str, Any]:
+async def validate_mfa_input(
+    hass: HomeAssistant, data: dict[str, Any]
+) -> dict[str, Any]:
     """Validate the MFA input allows us to connect."""
 
     session = async_get_clientsession(hass)
@@ -89,10 +106,13 @@ async def validate_mfa_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[
     # MFA Code is wrong, so display message.
     # {"code": "Mfa.Wrong.Code","message": "Mfa wrong code", "additionalData": [{"code": "Mfa.Available.Attempts","message": "4"}]}
     if "code" in body:
-        if body['code'] == CODE_MFA_CODE_WRONG:
-            err = body['message'] + " " + \
-                body['additionalData'][0]['message'] + \
-                " retries remaining"
+        if body["code"] == CODE_MFA_CODE_WRONG:
+            err = (
+                body["message"]
+                + " "
+                + body["additionalData"][0]["message"]
+                + " retries remaining"
+            )
     # Successful Login
     # {"customerId": "<CUSTOMER_ID>","token": "<ACCESS_TOKEN>"}
     if CUSTOMER_ID in body:
@@ -107,12 +127,13 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     VERSION = 1
 
     def __init__(self) -> None:
-
         self._mfa_token: str | None = None
         self._fingerprint: str | None = None
         self._email: str | None = None
 
-    async def async_step_mfa(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+    async def async_step_mfa(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
         """Handle the MFA step."""
 
         errors = {}
@@ -133,22 +154,22 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         else:
             print("user info")
             print(info)
-            if info['error'] is not None:
+            if info["error"] is not None:
                 errors["base"] = "invalid_auth"
-                placeholder = info['error']
+                placeholder = info["error"]
             else:
                 # if data is not null and contains MFA TOKEN then initiate MFA capture
-                if CUSTOMER_ID in info['data']:
-                    print("LOGIN SUCCESS")
+                if CUSTOMER_ID in info["data"]:
+                    print("LOGIN SUCCESS MFA")
                     # return self.async_create_entry(title=info["title"], data=user_input)
-                    
+
         print("MFA Errors")
         print(errors)
         return self.async_show_form(
             step_id="mfa",
             data_schema=STEP_MFA,
             description_placeholders={"email": placeholder},
-            errors=errors
+            errors=errors,
         )
 
     async def async_step_user(
@@ -165,8 +186,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         errors = {}
         placeholder = ""
 
-        unique_id = hashlib.md5(
-            user_input[CONF_EMAIL].encode("UTF-8")).hexdigest()
+        unique_id = hashlib.md5(user_input[CONF_EMAIL].encode("UTF-8")).hexdigest()
         self._fingerprint = str(uuid.UUID(hex=unique_id))
         self._email = user_input[CONF_EMAIL]
 
@@ -182,12 +202,12 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         else:
             print("Login info")
             print(info)
-            if info['error'] is not None:
+            if info["error"] is not None:
                 errors["base"] = "invalid_auth"
-                placeholder = info['error']
+                placeholder = info["error"]
             else:
                 # if data is not null and contains MFA TOKEN then initiate MFA capture
-                if info['data'] is not None:
+                if info["data"] is not None:
                     # MFA TOKEN initiates MFA code capture
                     if MFA_TOKEN in info["data"]:
                         self._mfa_token = info["data"][MFA_TOKEN]
@@ -195,11 +215,23 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                             step_id="mfa",
                             data_schema=STEP_MFA,
                             description_placeholders={
-                                "email": "Please enter the 8 character verification code sent to " + info['title']}
+                                "email": "Please enter the 8 character verification code sent to "
+                                + info["title"]
+                            },
                         )
-                    if CUSTOMER_ID in info['data']:
-                        print("LOGIN SUCCESS")
-                        # return self.async_create_entry(title=info["title"], data=user_input)
+                    if CUSTOMER_ID in info["data"]:
+                        print("LOGIN SUCCESS no MFA")
+                        ryanairData = {
+                            CONF_DEVICE_FINGERPRINT: user_input[
+                                CONF_DEVICE_FINGERPRINT
+                            ],
+                            CUSTOMER_ID: info["data"][CUSTOMER_ID],
+                            TOKEN: info["data"][TOKEN],
+                        }
+                        print(ryanairData)
+                        return self.async_create_entry(
+                            title=info["title"], data=ryanairData
+                        )
 
         print("Login Errors")
         print(errors)
@@ -207,5 +239,5 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             step_id="user",
             data_schema=STEP_USER_DATA_SCHEMA,
             description_placeholders={"retries": placeholder},
-            errors=errors
+            errors=errors,
         )

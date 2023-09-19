@@ -14,6 +14,7 @@ from .const import (
     ORDERS,
     V,
     CUSTOMERS,
+    ACCOUNTS,
     ACCOUNT_LOGIN,
     CONF_DEVICE_FINGERPRINT,
     CONF_POLICY_AGREED,
@@ -21,6 +22,12 @@ from .const import (
     ACCOUNT_VERIFICATION,
     DEVICE_VERIFICATION,
     MFA_TOKEN,
+    CONF_AUTH_TOKEN,
+    PROFILE,
+    CUSTOMER_ID,
+    TOKEN,
+    REMEMBER_ME_TOKEN,
+    DETAILS,
 )
 from .errors import RyanairError, InvalidAuth, APIRatelimitExceeded, UnknownError
 from homeassistant.exceptions import ConfigEntryAuthFailed
@@ -29,6 +36,60 @@ _LOGGER = logging.getLogger(__name__)
 
 USER_PROFILE_URL = HOST + USER_PROFILE + V
 ORDERS_URL = HOST + ORDERS + V
+
+
+class RyanairFlightsCoordinator(DataUpdateCoordinator):
+    """Flights Coordinator"""
+
+    def __init__(self, hass, session, data):
+        """Initialize coordinator."""
+
+        super().__init__(
+            hass,
+            _LOGGER,
+            # Name of the data. For logging purposes.
+            name="Ryanair",
+            # Polling interval. Will only be polled if there are subscribers.
+            update_interval=timedelta(seconds=600),
+        )
+
+        self.session = session
+        self.customerId = data[CUSTOMER_ID]
+        self.fingerprint = data[CONF_DEVICE_FINGERPRINT]
+        self.token = data[TOKEN]
+
+    async def _async_update_data(self):
+        """Fetch data from API endpoint."""
+        try:
+            profileResp = await self.session.request(
+                method="GET",
+                url=ORDERS_URL + ORDERS + self.customerId + "/" + DETAILS,
+                headers={
+                    "Content-Type": CONTENT_TYPE_JSON,
+                    CONF_DEVICE_FINGERPRINT: self.fingerprint,
+                    CONF_AUTH_TOKEN: self.token,
+                },
+            )
+            body = await profileResp.json()
+            print("Flights Response")
+            print(body)
+
+        except InvalidAuth as err:
+            raise ConfigEntryAuthFailed from err
+        except RyanairError as err:
+            raise UpdateFailed(str(err)) from err
+        except ValueError as err:
+            err_str = str(err)
+
+            if "Invalid authentication credentials" in err_str:
+                raise InvalidAuth from err
+            if "API rate limit exceeded." in err_str:
+                raise APIRatelimitExceeded from err
+
+            _LOGGER.exception("Unexpected exception")
+            raise UnknownError from err
+
+        return body
 
 
 class RyanairProfileCoordinator(DataUpdateCoordinator):
@@ -43,27 +104,68 @@ class RyanairProfileCoordinator(DataUpdateCoordinator):
             # Name of the data. For logging purposes.
             name="Ryanair",
             # Polling interval. Will only be polled if there are subscribers.
-            update_interval=timedelta(seconds=21600),
+            update_interval=timedelta(seconds=600),
         )
 
-        self.mfaToken = data[MFA_TOKEN]
+        self.session = session
+        self.customerId = data[CUSTOMER_ID]
         self.fingerprint = data[CONF_DEVICE_FINGERPRINT]
+        self.token = data[TOKEN]
 
     async def _async_update_data(self):
         """Fetch data from API endpoint."""
         try:
-            resp = await self.session.request(
+            profileResp = await self.session.request(
                 method="GET",
-                url=USER_PROFILE_URL + CUSTOMERS + "/" + DEVICE_VERIFICATION,
+                url=USER_PROFILE_URL
+                + CUSTOMERS
+                + "/"
+                + self.customerId
+                + "/"
+                + PROFILE,
                 headers={
                     "Content-Type": CONTENT_TYPE_JSON,
                     CONF_DEVICE_FINGERPRINT: self.fingerprint,
+                    CONF_AUTH_TOKEN: self.token,
                 },
-                json={MFA_CODE: self.mfaCode, MFA_TOKEN: self.mfaToken},
             )
-            body = await resp.json()
+            body = await profileResp.json()
             print("User Profile Response")
             print(body)
+            # https://services-api.ryanair.com/usrprof/v2/accounts/27c8vphxu3d/rememberMeToken
+
+            if (
+                "access-denied" in body
+                and body["access-denied"] == True
+                and body["cause"] == "NOT AUTHENTICATED"
+            ):
+                refreshTokenUrl = (
+                    USER_PROFILE_URL
+                    + ACCOUNTS
+                    + "/"
+                    + self.customerId
+                    + "/"
+                    + REMEMBER_ME_TOKEN
+                )
+                refreshTokenResp = await self.session.request(
+                    method="GET",
+                    url=str(refreshTokenUrl),
+                    headers={
+                        CONF_DEVICE_FINGERPRINT: self.fingerprint,
+                        CONF_AUTH_TOKEN: self.token,
+                    },
+                )
+                body = await refreshTokenResp.json()
+                print(refreshTokenUrl)
+                print("Refresh Token Response")
+                print(body)
+                print("headers")
+                print(
+                    {
+                        CONF_DEVICE_FINGERPRINT: self.fingerprint,
+                        CONF_AUTH_TOKEN: self.token,
+                    }
+                )
 
         except InvalidAuth as err:
             raise ConfigEntryAuthFailed from err
@@ -95,7 +197,7 @@ class RyanairMfaCoordinator(DataUpdateCoordinator):
             # Name of the data. For logging purposes.
             name="Ryanair",
             # Polling interval. Will only be polled if there are subscribers.
-            update_interval=timedelta(seconds=21600),
+            update_interval=timedelta(seconds=600),
         )
 
         self.session = session
@@ -116,6 +218,8 @@ class RyanairMfaCoordinator(DataUpdateCoordinator):
                 json={MFA_CODE: self.mfaCode, MFA_TOKEN: self.mfaToken},
             )
             body = await resp.json()
+            # session expired
+            # {'access-denied': True, 'message': 'Full authentication is required to access this resource.', 'cause': 'NOT AUTHENTICATED'}
 
         except InvalidAuth as err:
             raise ConfigEntryAuthFailed from err
@@ -147,7 +251,7 @@ class RyanairCoordinator(DataUpdateCoordinator):
             # Name of the data. For logging purposes.
             name="Ryanair",
             # Polling interval. Will only be polled if there are subscribers.
-            update_interval=timedelta(seconds=21600),
+            update_interval=timedelta(seconds=600),
         )
 
         self.session = session
