@@ -123,7 +123,7 @@ class RyanairFlightsSensor(CoordinatorEntity[RyanairFlightsCoordinator], SensorE
             configuration_url="https://github.com/jampez77/Ryanair/",
         )
         self._attr_unique_id = f"Ryanair_flights{name}-{description.key}".lower()
-        self.attrs: dict[str, Any] = {}
+        self._attrs: dict[str, Any] = {}
         self.entity_description = description
         self._state = None
         self._name = self.bookingRef
@@ -155,7 +155,39 @@ class RyanairFlightsSensor(CoordinatorEntity[RyanairFlightsCoordinator], SensorE
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        return self.attrs
+        flights = self.coordinator.data["items"][0]["rawBooking"]["flights"]
+        seats = self.coordinator.data["items"][0]["rawBooking"]["seats"]
+        passengers = self.coordinator.data["items"][0]["rawBooking"]["passengers"]
+
+        for flight in flights:
+            flightSeats = []
+            for seat in seats:
+                if seat["journeyNum"] == flight["journeyNum"]:
+                    for passenger in passengers:
+                        if seat["paxNum"] == passenger["paxNum"]:
+                            flightSeats.append(
+                                passenger["firstName"]
+                                + " "
+                                + passenger["lastName"]
+                                + " ("
+                                + seat["code"]
+                                + ")"
+                            )
+
+            flightDetails = {
+                "flightNumber": flight["flightNumber"],
+                "origin": flight["origin"],
+                "destination": flight["destination"],
+                "checkInOpenUTC": flight["checkInOpenUTC"],
+                "checkInCloseUTC": flight["checkInCloseUTC"],
+                "depart": flight["times"]["depart"],
+                "departUTC": flight["times"]["departUTC"],
+                "arrive": flight["times"]["arrive"],
+                "arriveUTC": flight["times"]["arriveUTC"],
+                "seats": flightSeats,
+            }
+            self._attrs[flight["journeyNum"]] = flightDetails
+        return self._attrs
 
     async def async_update(self) -> None:
         """Update the entity.
@@ -163,39 +195,6 @@ class RyanairFlightsSensor(CoordinatorEntity[RyanairFlightsCoordinator], SensorE
         Only used by the generic entity update service.
         """
         try:
-            flights = self.coordinator.data["items"][0]["rawBooking"]["flights"]
-            seats = self.coordinator.data["items"][0]["rawBooking"]["seats"]
-            passengers = self.coordinator.data["items"][0]["rawBooking"]["passengers"]
-
-            for flight in flights:
-                flightSeats = []
-                for seat in seats:
-                    if seat["journeyNum"] == flight["journeyNum"]:
-                        for passenger in passengers:
-                            if seat["paxNum"] == passenger["paxNum"]:
-                                flightSeats.append(
-                                    passenger["firstName"]
-                                    + " "
-                                    + passenger["lastName"]
-                                    + " ("
-                                    + seat["code"]
-                                    + ")"
-                                )
-
-                flightDetails = {
-                    "flightNumber": flight["flightNumber"],
-                    "origin": flight["origin"],
-                    "destination": flight["destination"],
-                    "checkInOpenUTC": flight["checkInOpenUTC"],
-                    "checkInCloseUTC": flight["checkInCloseUTC"],
-                    "depart": flight["times"]["depart"],
-                    "departUTC": flight["times"]["departUTC"],
-                    "arrive": flight["times"]["arrive"],
-                    "arriveUTC": flight["times"]["arriveUTC"],
-                    "seats": flightSeats,
-                }
-                self.attrs[flight["journeyNum"]] = flightDetails
-
             self._state = str(self.coordinator.data["items"][0]["rawBooking"]["status"])
             self._available = True
         except ClientError:
@@ -226,7 +225,7 @@ class RyanairProfileSensor(CoordinatorEntity[RyanairProfileCoordinator], SensorE
             configuration_url="https://github.com/jampez77/Ryanair/",
         )
         self._attr_unique_id = f"Ryanair_{name}-{description.key}".lower()
-        self.attrs: dict[str, Any] = {}
+        self._attrs: dict[str, Any] = {}
         self.entity_description = description
         self._state = None
         self._name = (
@@ -265,7 +264,9 @@ class RyanairProfileSensor(CoordinatorEntity[RyanairProfileCoordinator], SensorE
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        return self.attrs
+        for key in self.coordinator.data:
+            self._attrs[key] = self.coordinator.data[key]
+        return self._attrs
 
     async def async_update(self) -> None:
         """Update the entity.
@@ -273,9 +274,6 @@ class RyanairProfileSensor(CoordinatorEntity[RyanairProfileCoordinator], SensorE
         Only used by the generic entity update service.
         """
         try:
-            for key in self.coordinator.data:
-                self.attrs[key] = self.coordinator.data[key]
-
             self._state = str(self.coordinator.data["email"])
             self._available = True
         except ClientError:

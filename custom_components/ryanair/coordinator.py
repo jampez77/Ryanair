@@ -112,7 +112,9 @@ class RyanairFlightsCoordinator(DataUpdateCoordinator):
         try:
             body = await getUserProfile(self)
 
-            if "access-denied" in body and body["cause"] == "NOT AUTHENTICATED":
+            if ("access-denied" in body and body["cause"] == "NOT AUTHENTICATED") or (
+                "type" in body and body["type"] == "CLIENT_ERROR"
+            ):
                 refreshedToken = await refreshToken(self)
 
                 self.customerId = refreshedToken[CUSTOMER_ID]
@@ -163,7 +165,9 @@ class RyanairProfileCoordinator(DataUpdateCoordinator):
         try:
             body = await getFlights(self)
 
-            if "type" in body and body["type"] == "CLIENT_ERROR":
+            if ("access-denied" in body and body["cause"] == "NOT AUTHENTICATED") or (
+                "type" in body and body["type"] == "CLIENT_ERROR"
+            ):
                 refreshedToken = await refreshToken(self)
 
                 self.customerId = refreshedToken[CUSTOMER_ID]
