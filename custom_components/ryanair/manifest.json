@@ -10,6 +10,8 @@
   "homekit": {},
   "iot_class": "cloud_polling",
   "requirements": [],
+  "issue_tracker": "https://github.com/jampez77/Ryanair/issues",
+  "version": "v1.0.0",
   "ssdp": [],
   "zeroconf": []
 }
