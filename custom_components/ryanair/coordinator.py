@@ -28,9 +28,12 @@ from .const import (
     TOKEN,
     REMEMBER_ME_TOKEN,
     DETAILS,
+    PERSISTENCE,
 )
 from .errors import RyanairError, InvalidAuth, APIRatelimitExceeded, UnknownError
 from homeassistant.exceptions import ConfigEntryAuthFailed
+from homeassistant.util.json import JsonArrayType, load_json_object
+from homeassistant.helpers.json import save_json
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -38,52 +41,55 @@ USER_PROFILE_URL = HOST + USER_PROFILE + V
 ORDERS_URL = HOST + ORDERS + V
 
 
-async def refreshToken(self):
+async def refreshToken(self, data):
     resp = await self.session.request(
         method="GET",
         url=USER_PROFILE_URL
         + ACCOUNTS
         + "/"
-        + self.customerId
+        + data[CUSTOMER_ID]
         + "/"
         + REMEMBER_ME_TOKEN,
         headers={
-            CONF_DEVICE_FINGERPRINT: self.fingerprint,
-            CONF_AUTH_TOKEN: self.token,
+            CONF_DEVICE_FINGERPRINT: data[CONF_DEVICE_FINGERPRINT],
+            CONF_AUTH_TOKEN: data[TOKEN],
         },
     )
     body = await resp.json()
-
+    ryanairData = {
+        CONF_DEVICE_FINGERPRINT: data[CONF_DEVICE_FINGERPRINT],
+        CUSTOMER_ID: data[CUSTOMER_ID],
+        TOKEN: body[TOKEN],
+    }
+    save_json(self.hass.config.path(PERSISTENCE), ryanairData)
     return body
 
 
-async def getUserProfile(self):
+async def getUserProfile(self, data):
     resp = await self.session.request(
         method="GET",
-        url=ORDERS_URL + ORDERS + self.customerId + "/" + DETAILS,
+        url=ORDERS_URL + ORDERS + data[CUSTOMER_ID] + "/" + DETAILS,
         headers={
             "Content-Type": CONTENT_TYPE_JSON,
-            CONF_DEVICE_FINGERPRINT: self.fingerprint,
-            CONF_AUTH_TOKEN: self.token,
+            CONF_DEVICE_FINGERPRINT: data[CONF_DEVICE_FINGERPRINT],
+            CONF_AUTH_TOKEN: data[TOKEN],
         },
     )
     body = await resp.json()
-
     return body
 
 
-async def getFlights(self):
+async def getFlights(self, data):
     resp = await self.session.request(
         method="GET",
-        url=USER_PROFILE_URL + CUSTOMERS + "/" + self.customerId + "/" + PROFILE,
+        url=USER_PROFILE_URL + CUSTOMERS + "/" + data[CUSTOMER_ID] + "/" + PROFILE,
         headers={
             "Content-Type": CONTENT_TYPE_JSON,
-            CONF_DEVICE_FINGERPRINT: self.fingerprint,
-            CONF_AUTH_TOKEN: self.token,
+            CONF_DEVICE_FINGERPRINT: data[CONF_DEVICE_FINGERPRINT],
+            CONF_AUTH_TOKEN: data[TOKEN],
         },
     )
     body = await resp.json()
-
     return body
 
 
@@ -110,12 +116,14 @@ class RyanairFlightsCoordinator(DataUpdateCoordinator):
     async def _async_update_data(self):
         """Fetch data from API endpoint."""
         try:
-            body = await getUserProfile(self)
+            data = load_json_object(self.hass.config.path(PERSISTENCE))
+
+            body = await getUserProfile(self, data)
 
             if ("access-denied" in body and body["cause"] == "NOT AUTHENTICATED") or (
                 "type" in body and body["type"] == "CLIENT_ERROR"
             ):
-                refreshedToken = await refreshToken(self)
+                refreshedToken = await refreshToken(self, data)
 
                 self.customerId = refreshedToken[CUSTOMER_ID]
                 self.token = refreshedToken[TOKEN]
@@ -163,12 +171,14 @@ class RyanairProfileCoordinator(DataUpdateCoordinator):
     async def _async_update_data(self):
         """Fetch data from API endpoint."""
         try:
-            body = await getFlights(self)
+            data = load_json_object(self.hass.config.path(PERSISTENCE))
+
+            body = await getFlights(self, data)
 
             if ("access-denied" in body and body["cause"] == "NOT AUTHENTICATED") or (
                 "type" in body and body["type"] == "CLIENT_ERROR"
             ):
-                refreshedToken = await refreshToken(self)
+                refreshedToken = await refreshToken(self, data)
 
                 self.customerId = refreshedToken[CUSTOMER_ID]
                 self.token = refreshedToken[TOKEN]

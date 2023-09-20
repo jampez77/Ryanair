@@ -11,6 +11,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.const import CONF_EMAIL, CONF_PASSWORD
+from homeassistant.helpers.json import save_json
 from .const import (
     DOMAIN,
     CONF_DEVICE_FINGERPRINT,
@@ -21,6 +22,7 @@ from .const import (
     MFA_TOKEN,
     MFA_CODE,
     CODE_MFA_CODE_WRONG,
+    PERSISTENCE,
 )
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from .coordinator import RyanairCoordinator, RyanairMfaCoordinator
@@ -150,7 +152,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         CUSTOMER_ID: info["data"][CUSTOMER_ID],
                         TOKEN: info["data"][TOKEN],
                     }
-
+                    save_json(self.hass.config.path(PERSISTENCE), ryanairData)
                     return self.async_create_entry(
                         title=info["title"], data=ryanairData
                     )
@@ -212,7 +214,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                             CUSTOMER_ID: info["data"][CUSTOMER_ID],
                             TOKEN: info["data"][TOKEN],
                         }
-
+                        save_json(self.hass.config.path(PERSISTENCE), ryanairData)
                         return self.async_create_entry(
                             title=info["title"], data=ryanairData
                         )

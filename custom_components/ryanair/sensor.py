@@ -5,7 +5,7 @@ from aiohttp import ClientError
 from homeassistant.core import HomeAssistant, callback
 from typing import Any
 from homeassistant.helpers.typing import ConfigType, DiscoveryInfoType
-from .const import DOMAIN, CUSTOMER_ID
+from .const import DOMAIN, CUSTOMER_ID, PERSISTENCE
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
@@ -63,6 +63,7 @@ async def async_setup_entry(
         RyanairProfileSensor(profileCoordinator, name, profileDescription),
         RyanairFlightsSensor(flightsCoordinator, name, flightsDescription),
     ]
+
     async_add_entities(sensors, update_before_add=True)
 
 
@@ -97,6 +98,7 @@ async def async_setup_platform(
         RyanairProfileSensor(profileCoordinator, name, profileDescription),
         RyanairFlightsSensor(flightsCoordinator, name, flightsDescription),
     ]
+
     async_add_entities(sensors, update_before_add=True)
 
 
