@@ -49,12 +49,8 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str,
     await coordinator.async_refresh()
 
     if coordinator.last_exception is not None:
-        print("Login Exception")
-        print(coordinator.last_exception)
         raise coordinator.last_exception
 
-    print("Login coordinator")
-    print(coordinator.data)
     body = coordinator.data
 
     err = None
@@ -93,12 +89,8 @@ async def validate_mfa_input(
     await coordinator.async_refresh()
 
     if coordinator.last_exception is not None:
-        print("MFA Exception")
-        print(coordinator.last_exception)
         raise coordinator.last_exception
 
-    print("MFA coordinator")
-    print(coordinator.data)
     body = coordinator.data
 
     err = None
@@ -142,29 +134,27 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         user_input[CONF_EMAIL] = self._email
         user_input[CONF_DEVICE_FINGERPRINT] = self._fingerprint
 
-        print("MFA user input")
-        print(user_input)
         try:
             info = await validate_mfa_input(self.hass, user_input)
         except CannotConnect:
             errors["base"] = "cannot_connect"
-        except Exception:
-            _LOGGER.exception("Unexpected exception")
-            errors["base"] = "unknown"
         else:
-            print("user info")
-            print(info)
             if info["error"] is not None:
                 errors["base"] = "invalid_auth"
                 placeholder = info["error"]
             else:
                 # if data is not null and contains MFA TOKEN then initiate MFA capture
                 if CUSTOMER_ID in info["data"]:
-                    print("LOGIN SUCCESS MFA")
-                    # return self.async_create_entry(title=info["title"], data=user_input)
+                    ryanairData = {
+                        CONF_DEVICE_FINGERPRINT: user_input[CONF_DEVICE_FINGERPRINT],
+                        CUSTOMER_ID: info["data"][CUSTOMER_ID],
+                        TOKEN: info["data"][TOKEN],
+                    }
 
-        print("MFA Errors")
-        print(errors)
+                    return self.async_create_entry(
+                        title=info["title"], data=ryanairData
+                    )
+
         return self.async_show_form(
             step_id="mfa",
             data_schema=STEP_MFA,
@@ -196,12 +186,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             info = await validate_input(self.hass, user_input)
         except CannotConnect:
             errors["base"] = "cannot_connect"
-        except Exception:
-            _LOGGER.exception("Unexpected exception")
-            errors["base"] = "unknown"
         else:
-            print("Login info")
-            print(info)
             if info["error"] is not None:
                 errors["base"] = "invalid_auth"
                 placeholder = info["error"]
@@ -220,7 +205,6 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                             },
                         )
                     if CUSTOMER_ID in info["data"]:
-                        print("LOGIN SUCCESS no MFA")
                         ryanairData = {
                             CONF_DEVICE_FINGERPRINT: user_input[
                                 CONF_DEVICE_FINGERPRINT
@@ -228,13 +212,11 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                             CUSTOMER_ID: info["data"][CUSTOMER_ID],
                             TOKEN: info["data"][TOKEN],
                         }
-                        print(ryanairData)
+
                         return self.async_create_entry(
                             title=info["title"], data=ryanairData
                         )
 
-        print("Login Errors")
-        print(errors)
         return self.async_show_form(
             step_id="user",
             data_schema=STEP_USER_DATA_SCHEMA,

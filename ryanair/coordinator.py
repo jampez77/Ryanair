@@ -2,7 +2,7 @@
 from datetime import timedelta
 import logging
 from homeassistant.const import CONF_EMAIL, CONF_PASSWORD, CONTENT_TYPE_JSON
-
+from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import (
     DataUpdateCoordinator,
     UpdateFailed,
@@ -38,10 +38,59 @@ USER_PROFILE_URL = HOST + USER_PROFILE + V
 ORDERS_URL = HOST + ORDERS + V
 
 
+async def refreshToken(self):
+    resp = await self.session.request(
+        method="GET",
+        url=USER_PROFILE_URL
+        + ACCOUNTS
+        + "/"
+        + self.customerId
+        + "/"
+        + REMEMBER_ME_TOKEN,
+        headers={
+            CONF_DEVICE_FINGERPRINT: self.fingerprint,
+            CONF_AUTH_TOKEN: self.token,
+        },
+    )
+    body = await resp.json()
+
+    return body
+
+
+async def getUserProfile(self):
+    resp = await self.session.request(
+        method="GET",
+        url=ORDERS_URL + ORDERS + self.customerId + "/" + DETAILS,
+        headers={
+            "Content-Type": CONTENT_TYPE_JSON,
+            CONF_DEVICE_FINGERPRINT: self.fingerprint,
+            CONF_AUTH_TOKEN: self.token,
+        },
+    )
+    body = await resp.json()
+
+    return body
+
+
+async def getFlights(self):
+    resp = await self.session.request(
+        method="GET",
+        url=USER_PROFILE_URL + CUSTOMERS + "/" + self.customerId + "/" + PROFILE,
+        headers={
+            "Content-Type": CONTENT_TYPE_JSON,
+            CONF_DEVICE_FINGERPRINT: self.fingerprint,
+            CONF_AUTH_TOKEN: self.token,
+        },
+    )
+    body = await resp.json()
+
+    return body
+
+
 class RyanairFlightsCoordinator(DataUpdateCoordinator):
     """Flights Coordinator"""
 
-    def __init__(self, hass, session, data):
+    def __init__(self, hass: HomeAssistant, session, data) -> None:
         """Initialize coordinator."""
 
         super().__init__(
@@ -50,7 +99,7 @@ class RyanairFlightsCoordinator(DataUpdateCoordinator):
             # Name of the data. For logging purposes.
             name="Ryanair",
             # Polling interval. Will only be polled if there are subscribers.
-            update_interval=timedelta(seconds=600),
+            update_interval=timedelta(seconds=300),
         )
 
         self.session = session
@@ -61,18 +110,15 @@ class RyanairFlightsCoordinator(DataUpdateCoordinator):
     async def _async_update_data(self):
         """Fetch data from API endpoint."""
         try:
-            profileResp = await self.session.request(
-                method="GET",
-                url=ORDERS_URL + ORDERS + self.customerId + "/" + DETAILS,
-                headers={
-                    "Content-Type": CONTENT_TYPE_JSON,
-                    CONF_DEVICE_FINGERPRINT: self.fingerprint,
-                    CONF_AUTH_TOKEN: self.token,
-                },
-            )
-            body = await profileResp.json()
-            print("Flights Response")
-            print(body)
+            body = await getUserProfile(self)
+
+            if "access-denied" in body and body["cause"] == "NOT AUTHENTICATED":
+                refreshedToken = await refreshToken(self)
+
+                self.customerId = refreshedToken[CUSTOMER_ID]
+                self.token = refreshedToken[TOKEN]
+
+                body = await getUserProfile(self)
 
         except InvalidAuth as err:
             raise ConfigEntryAuthFailed from err
@@ -95,7 +141,7 @@ class RyanairFlightsCoordinator(DataUpdateCoordinator):
 class RyanairProfileCoordinator(DataUpdateCoordinator):
     """User Profile Coordinator"""
 
-    def __init__(self, hass, session, data):
+    def __init__(self, hass: HomeAssistant, session, data) -> None:
         """Initialize coordinator."""
 
         super().__init__(
@@ -104,7 +150,7 @@ class RyanairProfileCoordinator(DataUpdateCoordinator):
             # Name of the data. For logging purposes.
             name="Ryanair",
             # Polling interval. Will only be polled if there are subscribers.
-            update_interval=timedelta(seconds=600),
+            update_interval=timedelta(seconds=300),
         )
 
         self.session = session
@@ -115,57 +161,15 @@ class RyanairProfileCoordinator(DataUpdateCoordinator):
     async def _async_update_data(self):
         """Fetch data from API endpoint."""
         try:
-            profileResp = await self.session.request(
-                method="GET",
-                url=USER_PROFILE_URL
-                + CUSTOMERS
-                + "/"
-                + self.customerId
-                + "/"
-                + PROFILE,
-                headers={
-                    "Content-Type": CONTENT_TYPE_JSON,
-                    CONF_DEVICE_FINGERPRINT: self.fingerprint,
-                    CONF_AUTH_TOKEN: self.token,
-                },
-            )
-            body = await profileResp.json()
-            print("User Profile Response")
-            print(body)
-            # https://services-api.ryanair.com/usrprof/v2/accounts/27c8vphxu3d/rememberMeToken
+            body = await getFlights(self)
 
-            if (
-                "access-denied" in body
-                and body["access-denied"] == True
-                and body["cause"] == "NOT AUTHENTICATED"
-            ):
-                refreshTokenUrl = (
-                    USER_PROFILE_URL
-                    + ACCOUNTS
-                    + "/"
-                    + self.customerId
-                    + "/"
-                    + REMEMBER_ME_TOKEN
-                )
-                refreshTokenResp = await self.session.request(
-                    method="GET",
-                    url=str(refreshTokenUrl),
-                    headers={
-                        CONF_DEVICE_FINGERPRINT: self.fingerprint,
-                        CONF_AUTH_TOKEN: self.token,
-                    },
-                )
-                body = await refreshTokenResp.json()
-                print(refreshTokenUrl)
-                print("Refresh Token Response")
-                print(body)
-                print("headers")
-                print(
-                    {
-                        CONF_DEVICE_FINGERPRINT: self.fingerprint,
-                        CONF_AUTH_TOKEN: self.token,
-                    }
-                )
+            if "type" in body and body["type"] == "CLIENT_ERROR":
+                refreshedToken = await refreshToken(self)
+
+                self.customerId = refreshedToken[CUSTOMER_ID]
+                self.token = refreshedToken[TOKEN]
+
+                body = await getFlights(self)
 
         except InvalidAuth as err:
             raise ConfigEntryAuthFailed from err
@@ -188,7 +192,7 @@ class RyanairProfileCoordinator(DataUpdateCoordinator):
 class RyanairMfaCoordinator(DataUpdateCoordinator):
     """MFA coordinator."""
 
-    def __init__(self, hass, session, data):
+    def __init__(self, hass: HomeAssistant, session, data) -> None:
         """Initialize coordinator."""
 
         super().__init__(
@@ -197,7 +201,7 @@ class RyanairMfaCoordinator(DataUpdateCoordinator):
             # Name of the data. For logging purposes.
             name="Ryanair",
             # Polling interval. Will only be polled if there are subscribers.
-            update_interval=timedelta(seconds=600),
+            update_interval=timedelta(seconds=300),
         )
 
         self.session = session
@@ -242,7 +246,7 @@ class RyanairMfaCoordinator(DataUpdateCoordinator):
 class RyanairCoordinator(DataUpdateCoordinator):
     """Data coordinator."""
 
-    def __init__(self, hass, session, data):
+    def __init__(self, hass: HomeAssistant, session, data) -> None:
         """Initialize coordinator."""
 
         super().__init__(
@@ -251,7 +255,7 @@ class RyanairCoordinator(DataUpdateCoordinator):
             # Name of the data. For logging purposes.
             name="Ryanair",
             # Polling interval. Will only be polled if there are subscribers.
-            update_interval=timedelta(seconds=600),
+            update_interval=timedelta(seconds=300),
         )
 
         self.session = session
@@ -280,8 +284,6 @@ class RyanairCoordinator(DataUpdateCoordinator):
                 },
             )
             body = await resp.json()
-            print("Login Response")
-            print(body)
 
         except InvalidAuth as err:
             raise ConfigEntryAuthFailed from err

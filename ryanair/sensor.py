@@ -36,8 +36,7 @@ async def async_setup_entry(
         config.update(entry.options)
 
     session = async_get_clientsession(hass)
-    print("entryData")
-    print(entry.data)
+
     profileCoordinator = RyanairProfileCoordinator(hass, session, entry.data)
 
     await profileCoordinator.async_refresh()
@@ -75,6 +74,7 @@ async def async_setup_platform(
 ) -> None:
     """Set up the sensor platform."""
     session = async_get_clientsession(hass)
+
     profileCoordinator = RyanairProfileCoordinator(hass, session, config)
 
     name = config[CUSTOMER_ID]
@@ -288,7 +288,7 @@ class RyanairProfileSensor(CoordinatorEntity[RyanairProfileCoordinator], SensorE
 class RyanairEntity(CoordinatorEntity, SensorEntity):
     """An entity using CoordinatorEntity."""
 
-    def __init__(self, coordinator, idx):
+    def __init__(self, coordinator, idx) -> None:
         """Pass coordinator to CoordinatorEntity."""
         super().__init__(coordinator, context=idx)
         self.idx = idx
