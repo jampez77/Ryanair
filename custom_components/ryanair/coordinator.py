@@ -29,6 +29,8 @@ from .const import (
     REMEMBER_ME_TOKEN,
     DETAILS,
     PERSISTENCE,
+    REMEMBER_ME,
+    X_REMEMBER_ME_TOKEN,
 )
 from .errors import RyanairError, InvalidAuth, APIRatelimitExceeded, UnknownError
 from homeassistant.exceptions import ConfigEntryAuthFailed
@@ -42,7 +44,7 @@ ORDERS_URL = HOST + ORDERS + V
 
 
 async def refreshToken(self, data):
-    resp = await self.session.request(
+    rememberMeTokenResp = await self.session.request(
         method="GET",
         url=USER_PROFILE_URL
         + ACCOUNTS
@@ -55,14 +57,27 @@ async def refreshToken(self, data):
             CONF_AUTH_TOKEN: data[TOKEN],
         },
     )
-    body = await resp.json()
+    rememberMeTokenResponse = await rememberMeTokenResp.json()
+
+    rememberMeToken = rememberMeTokenResponse[TOKEN]
+
+    rememberMeResp = await self.session.request(
+        method="GET",
+        url=USER_PROFILE_URL + ACCOUNTS + "/" + REMEMBER_ME,
+        headers={
+            CONF_DEVICE_FINGERPRINT: data[CONF_DEVICE_FINGERPRINT],
+            X_REMEMBER_ME_TOKEN: rememberMeToken,
+        },
+    )
+    rememberMeResponse = await rememberMeResp.json()
+
     ryanairData = {
         CONF_DEVICE_FINGERPRINT: data[CONF_DEVICE_FINGERPRINT],
         CUSTOMER_ID: data[CUSTOMER_ID],
-        TOKEN: body[TOKEN],
+        TOKEN: rememberMeResponse[TOKEN],
     }
     save_json(self.hass.config.path(PERSISTENCE), ryanairData)
-    return body
+    return rememberMeResponse
 
 
 async def getUserProfile(self, data):
