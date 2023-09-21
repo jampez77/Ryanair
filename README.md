@@ -42,4 +42,4 @@ Once installed, login with your Ryanair credentials (Social sign in is not suppo
 [license-shield]: https://img.shields.io/github/license/jampez77/Ryanair.svg?style=for-the-badge
 [maintenance-shield]: https://img.shields.io/badge/Maintainer-Jamie%20Nandhra--Pezone-blue
 [releases-shield]: https://img.shields.io/github/v/release/jampez77/Ryanair.svg?style=for-the-badge
-[releases]: https://github.com/jampez77/Ryanair/releases
+[releases]: https://github.com/jampez77/Ryanair/releases 
