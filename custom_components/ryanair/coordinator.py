@@ -148,7 +148,7 @@ class RyanairFlightsCoordinator(DataUpdateCoordinator):
                 self.customerId = refreshedToken[CUSTOMER_ID]
                 self.token = refreshedToken[TOKEN]
 
-                body = await getUserProfile(self)
+                body = await getUserProfile(self, data)
 
         except InvalidAuth as err:
             raise ConfigEntryAuthFailed from err
