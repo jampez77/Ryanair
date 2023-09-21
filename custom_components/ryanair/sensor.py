@@ -5,7 +5,13 @@ from aiohttp import ClientError
 from homeassistant.core import HomeAssistant, callback
 from typing import Any
 from homeassistant.helpers.typing import ConfigType, DiscoveryInfoType
-from .const import DOMAIN, CUSTOMER_ID, PERSISTENCE
+from .const import (
+    DOMAIN,
+    CUSTOMER_ID,
+    ACCESS_DENIED,
+    CAUSE,
+    TYPE
+)
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
@@ -18,7 +24,7 @@ from homeassistant.helpers.update_coordinator import (
     CoordinatorEntity,
 )
 from .coordinator import RyanairProfileCoordinator, RyanairFlightsCoordinator
-
+from homeassistant.util.json import JsonObjectType
 _LOGGER = logging.getLogger(__name__)
 # Time between updating data from GitHub
 SCAN_INTERVAL = timedelta(minutes=10)
@@ -59,10 +65,16 @@ async def async_setup_entry(
         name="Flights",
     )
 
-    sensors = [
-        RyanairProfileSensor(profileCoordinator, name, profileDescription),
-        RyanairFlightsSensor(flightsCoordinator, name, flightsDescription),
-    ]
+    sensors = []
+
+    if (ACCESS_DENIED not in profileCoordinator.data and CAUSE not in profileCoordinator.data and TYPE not in profileCoordinator.data):
+        sensors.append(RyanairProfileSensor(
+            profileCoordinator, name, profileDescription))
+
+    if "items" in flightsCoordinator.data and len(flightsCoordinator.data["items"]) > 0:
+        for item in flightsCoordinator.data["items"]:
+            sensors.append(RyanairFlightsSensor(
+                flightsCoordinator, item, name, flightsDescription))
 
     async_add_entities(sensors, update_before_add=True)
 
@@ -94,13 +106,16 @@ async def async_setup_platform(
         name="Flights",
     )
 
-    sensors = [
-        RyanairProfileSensor(profileCoordinator, name, profileDescription),
-    ]
+    sensors = []
+
+    if (ACCESS_DENIED not in profileCoordinator.data and CAUSE not in profileCoordinator.data and TYPE not in profileCoordinator.data):
+        sensors.append(RyanairProfileSensor(
+            profileCoordinator, name, profileDescription))
 
     if "items" in flightsCoordinator.data and len(flightsCoordinator.data["items"]) > 0:
-        sensors.append(RyanairFlightsSensor(
-            flightsCoordinator, name, flightsDescription))
+        for item in flightsCoordinator.data["items"]:
+            sensors.append(RyanairFlightsSensor(
+                flightsCoordinator, item, name, flightsDescription))
 
     async_add_entities(sensors, update_before_add=True)
 
@@ -111,20 +126,18 @@ class RyanairFlightsSensor(CoordinatorEntity[RyanairFlightsCoordinator], SensorE
     def __init__(
         self,
         coordinator: RyanairFlightsCoordinator,
+        booking: JsonObjectType,
         name: str,
         description: SensorEntityDescription,
     ) -> None:
         """Initialize."""
         super().__init__(coordinator)
-
-        self.bookingRef = self.coordinator.data["items"][0]["rawBooking"][
-            "recordLocator"
-        ]
-
+        self.booking = booking["rawBooking"]
+        self.bookingRef = self.booking["recordLocator"]
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, f"Ryanair_flights{name}")},
             manufacturer="Ryanair",
-            name="ryanair_" + self.bookingRef,
+            name="Flight " + self.bookingRef,
             configuration_url="https://github.com/jampez77/Ryanair/",
         )
         self._attr_unique_id = f"Ryanair_flights{name}-{description.key}".lower()
@@ -160,9 +173,9 @@ class RyanairFlightsSensor(CoordinatorEntity[RyanairFlightsCoordinator], SensorE
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        flights = self.coordinator.data["items"][0]["rawBooking"]["flights"]
-        seats = self.coordinator.data["items"][0]["rawBooking"]["seats"]
-        passengers = self.coordinator.data["items"][0]["rawBooking"]["passengers"]
+        flights = self.booking["flights"]
+        seats = self.booking["seats"]
+        passengers = self.booking["passengers"]
 
         for flight in flights:
             flightSeats = []
@@ -201,7 +214,7 @@ class RyanairFlightsSensor(CoordinatorEntity[RyanairFlightsCoordinator], SensorE
         """
         try:
             self._state = str(
-                self.coordinator.data["items"][0]["rawBooking"]["status"])
+                self.booking["status"])
             self._available = True
         except ClientError:
             self._available = False

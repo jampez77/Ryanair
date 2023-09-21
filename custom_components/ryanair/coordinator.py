@@ -31,6 +31,11 @@ from .const import (
     PERSISTENCE,
     REMEMBER_ME,
     X_REMEMBER_ME_TOKEN,
+    ACCESS_DENIED,
+    CAUSE,
+    NOT_AUTHENTICATED,
+    CLIENT_ERROR,
+    TYPE
 )
 from .errors import RyanairError, InvalidAuth, APIRatelimitExceeded, UnknownError
 from homeassistant.exceptions import ConfigEntryAuthFailed
@@ -54,15 +59,17 @@ async def refreshToken(self, data):
         + REMEMBER_ME_TOKEN,
         headers={
             CONF_DEVICE_FINGERPRINT: data[CONF_DEVICE_FINGERPRINT],
-            CONF_AUTH_TOKEN: data[X_REMEMBER_ME_TOKEN],
+            CONF_AUTH_TOKEN: data[TOKEN],
         },
     )
     rememberMeTokenResponse = await rememberMeTokenResp.json()
 
     if TOKEN in rememberMeTokenResponse:
         rememberMeToken = rememberMeTokenResponse[TOKEN]
-    else:
+    elif X_REMEMBER_ME_TOKEN in data:
         rememberMeToken = data[X_REMEMBER_ME_TOKEN]
+    else:
+        rememberMeToken = "unknown"
 
     rememberMeResp = await self.session.request(
         method="GET",
@@ -74,17 +81,24 @@ async def refreshToken(self, data):
     )
     rememberMeResponse = await rememberMeResp.json()
 
+    if TOKEN in rememberMeResponse:
+        token = rememberMeResponse[TOKEN]
+    elif X_REMEMBER_ME_TOKEN in data:
+        token = data[TOKEN]
+    else:
+        token = "unknown"
+
     ryanairData = {
         CONF_DEVICE_FINGERPRINT: data[CONF_DEVICE_FINGERPRINT],
         CUSTOMER_ID: data[CUSTOMER_ID],
-        TOKEN: rememberMeResponse[TOKEN],
+        TOKEN: token,
         X_REMEMBER_ME_TOKEN: rememberMeToken
     }
     save_json(self.hass.config.path(PERSISTENCE), ryanairData)
     return rememberMeResponse
 
 
-async def getUserProfile(self, data):
+async def getFlights(self, data):
     resp = await self.session.request(
         method="GET",
         url=ORDERS_URL + ORDERS + data[CUSTOMER_ID] + "/" + DETAILS,
@@ -95,10 +109,11 @@ async def getUserProfile(self, data):
         },
     )
     body = await resp.json()
+
     return body
 
 
-async def getFlights(self, data):
+async def getUserProfile(self, data):
     resp = await self.session.request(
         method="GET",
         url=USER_PROFILE_URL + CUSTOMERS + "/" +
@@ -110,6 +125,7 @@ async def getFlights(self, data):
         },
     )
     body = await resp.json()
+
     return body
 
 
@@ -138,17 +154,17 @@ class RyanairFlightsCoordinator(DataUpdateCoordinator):
         try:
             data = load_json_object(self.hass.config.path(PERSISTENCE))
 
-            body = await getUserProfile(self, data)
+            body = await getFlights(self, data)
 
-            if ("access-denied" in body and body["cause"] == "NOT AUTHENTICATED") or (
-                "type" in body and body["type"] == "CLIENT_ERROR"
+            if (ACCESS_DENIED in body and body[CAUSE] == NOT_AUTHENTICATED) or (
+                TYPE in body and body[TYPE] == CLIENT_ERROR
             ):
                 refreshedToken = await refreshToken(self, data)
 
                 self.customerId = refreshedToken[CUSTOMER_ID]
                 self.token = refreshedToken[TOKEN]
 
-                body = await getUserProfile(self, data)
+                body = await getFlights(self, data)
 
         except InvalidAuth as err:
             raise ConfigEntryAuthFailed from err
@@ -193,17 +209,17 @@ class RyanairProfileCoordinator(DataUpdateCoordinator):
         try:
             data = load_json_object(self.hass.config.path(PERSISTENCE))
 
-            body = await getFlights(self, data)
+            body = await getUserProfile(self, data)
 
-            if ("access-denied" in body and body["cause"] == "NOT AUTHENTICATED") or (
-                "type" in body and body["type"] == "CLIENT_ERROR"
+            if (ACCESS_DENIED in body and body[CAUSE] == NOT_AUTHENTICATED) or (
+                TYPE in body and body[TYPE] == CLIENT_ERROR
             ):
                 refreshedToken = await refreshToken(self, data)
 
                 self.customerId = refreshedToken[CUSTOMER_ID]
                 self.token = refreshedToken[TOKEN]
 
-                body = await getFlights(self, data)
+                body = await getUserProfile(self, data)
 
         except InvalidAuth as err:
             raise ConfigEntryAuthFailed from err
