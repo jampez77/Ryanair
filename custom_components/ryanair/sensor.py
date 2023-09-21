@@ -197,7 +197,8 @@ class RyanairFlightsSensor(CoordinatorEntity[RyanairFlightsCoordinator], SensorE
         Only used by the generic entity update service.
         """
         try:
-            self._state = str(self.coordinator.data["items"][0]["rawBooking"]["status"])
+            self._state = str(
+                self.coordinator.data["items"][0]["rawBooking"]["status"])
             self._available = True
         except ClientError:
             self._available = False
@@ -231,7 +232,8 @@ class RyanairProfileSensor(CoordinatorEntity[RyanairProfileCoordinator], SensorE
         self.entity_description = description
         self._state = None
         self._name = (
-            self.coordinator.data["firstName"] + " " + self.coordinator.data["lastName"]
+            self.coordinator.data["firstName"] +
+            " " + self.coordinator.data["lastName"]
         )
         self._available = True
 
@@ -262,7 +264,10 @@ class RyanairProfileSensor(CoordinatorEntity[RyanairProfileCoordinator], SensorE
     @property
     def entity_picture(self) -> str:
         """Return a representative icon."""
-        return self.coordinator.data["googlePictureUrl"]
+        if "googlePictureUrl" in self.coordinator.data:
+            return self.coordinator.data["googlePictureUrl"]
+        else:
+            return self._attr_entity_picture
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
