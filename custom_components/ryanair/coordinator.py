@@ -54,12 +54,15 @@ async def refreshToken(self, data):
         + REMEMBER_ME_TOKEN,
         headers={
             CONF_DEVICE_FINGERPRINT: data[CONF_DEVICE_FINGERPRINT],
-            CONF_AUTH_TOKEN: data[TOKEN],
+            CONF_AUTH_TOKEN: data[X_REMEMBER_ME_TOKEN],
         },
     )
     rememberMeTokenResponse = await rememberMeTokenResp.json()
 
-    rememberMeToken = rememberMeTokenResponse[TOKEN]
+    if TOKEN in rememberMeTokenResponse:
+        rememberMeToken = rememberMeTokenResponse[TOKEN]
+    else:
+        rememberMeToken = data[X_REMEMBER_ME_TOKEN]
 
     rememberMeResp = await self.session.request(
         method="GET",
@@ -75,6 +78,7 @@ async def refreshToken(self, data):
         CONF_DEVICE_FINGERPRINT: data[CONF_DEVICE_FINGERPRINT],
         CUSTOMER_ID: data[CUSTOMER_ID],
         TOKEN: rememberMeResponse[TOKEN],
+        X_REMEMBER_ME_TOKEN: rememberMeToken
     }
     save_json(self.hass.config.path(PERSISTENCE), ryanairData)
     return rememberMeResponse
@@ -97,7 +101,8 @@ async def getUserProfile(self, data):
 async def getFlights(self, data):
     resp = await self.session.request(
         method="GET",
-        url=USER_PROFILE_URL + CUSTOMERS + "/" + data[CUSTOMER_ID] + "/" + PROFILE,
+        url=USER_PROFILE_URL + CUSTOMERS + "/" +
+        data[CUSTOMER_ID] + "/" + PROFILE,
         headers={
             "Content-Type": CONTENT_TYPE_JSON,
             CONF_DEVICE_FINGERPRINT: data[CONF_DEVICE_FINGERPRINT],
@@ -198,7 +203,7 @@ class RyanairProfileCoordinator(DataUpdateCoordinator):
                 self.customerId = refreshedToken[CUSTOMER_ID]
                 self.token = refreshedToken[TOKEN]
 
-                body = await getFlights(self)
+                body = await getFlights(self, data)
 
         except InvalidAuth as err:
             raise ConfigEntryAuthFailed from err
