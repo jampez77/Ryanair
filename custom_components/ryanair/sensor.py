@@ -96,8 +96,11 @@ async def async_setup_platform(
 
     sensors = [
         RyanairProfileSensor(profileCoordinator, name, profileDescription),
-        RyanairFlightsSensor(flightsCoordinator, name, flightsDescription),
     ]
+
+    if "items" in flightsCoordinator.data and len(flightsCoordinator.data["items"]) > 0:
+        sensors.append(RyanairFlightsSensor(
+            flightsCoordinator, name, flightsDescription))
 
     async_add_entities(sensors, update_before_add=True)
 
