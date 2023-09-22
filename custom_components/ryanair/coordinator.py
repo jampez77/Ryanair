@@ -8,7 +8,6 @@ from homeassistant.helpers.update_coordinator import (
     UpdateFailed,
 )
 from .const import (
-    DOMAIN,
     HOST,
     USER_PROFILE,
     ORDERS,
@@ -48,7 +47,7 @@ USER_PROFILE_URL = HOST + USER_PROFILE + V
 ORDERS_URL = HOST + ORDERS + V
 
 
-async def refreshToken(self, data):
+async def rememberMeToken(self, data):
     rememberMeTokenResp = await self.session.request(
         method="GET",
         url=USER_PROFILE_URL
@@ -64,38 +63,38 @@ async def refreshToken(self, data):
     )
     rememberMeTokenResponse = await rememberMeTokenResp.json()
 
-    if TOKEN in rememberMeTokenResponse:
-        rememberMeToken = rememberMeTokenResponse[TOKEN]
-    elif X_REMEMBER_ME_TOKEN in data:
-        rememberMeToken = data[X_REMEMBER_ME_TOKEN]
-    else:
-        rememberMeToken = "unknown"
+    return rememberMeTokenResponse
 
+
+async def refreshToken(self, data):
     rememberMeResp = await self.session.request(
         method="GET",
         url=USER_PROFILE_URL + ACCOUNTS + "/" + REMEMBER_ME,
         headers={
             CONF_DEVICE_FINGERPRINT: data[CONF_DEVICE_FINGERPRINT],
-            X_REMEMBER_ME_TOKEN: rememberMeToken,
+            X_REMEMBER_ME_TOKEN: data[X_REMEMBER_ME_TOKEN],
         },
     )
     rememberMeResponse = await rememberMeResp.json()
 
-    if TOKEN in rememberMeResponse:
-        token = rememberMeResponse[TOKEN]
-    elif X_REMEMBER_ME_TOKEN in data:
-        token = data[TOKEN]
-    else:
-        token = "unknown"
+    ryanairData = {
+        CONF_DEVICE_FINGERPRINT: data[CONF_DEVICE_FINGERPRINT],
+        CUSTOMER_ID: data[CUSTOMER_ID],
+        TOKEN: rememberMeResponse[TOKEN],
+        X_REMEMBER_ME_TOKEN: data[X_REMEMBER_ME_TOKEN]
+    }
+
+    rememberMeTokenResp = await rememberMeToken(self, ryanairData)
 
     ryanairData = {
         CONF_DEVICE_FINGERPRINT: data[CONF_DEVICE_FINGERPRINT],
         CUSTOMER_ID: data[CUSTOMER_ID],
-        TOKEN: token,
-        X_REMEMBER_ME_TOKEN: rememberMeToken
+        TOKEN: rememberMeResponse[TOKEN],
+        X_REMEMBER_ME_TOKEN: rememberMeTokenResp[TOKEN]
     }
+
     save_json(self.hass.config.path(PERSISTENCE), ryanairData)
-    return rememberMeResponse
+    return ryanairData
 
 
 async def getFlights(self, data):
@@ -145,26 +144,31 @@ class RyanairFlightsCoordinator(DataUpdateCoordinator):
         )
 
         self.session = session
-        self.customerId = data[CUSTOMER_ID]
-        self.fingerprint = data[CONF_DEVICE_FINGERPRINT]
-        self.token = data[TOKEN]
 
     async def _async_update_data(self):
         """Fetch data from API endpoint."""
         try:
             data = load_json_object(self.hass.config.path(PERSISTENCE))
 
+            if X_REMEMBER_ME_TOKEN not in data:
+                rememberMeTokenResp = await rememberMeToken(self, data)
+
+                data = {
+                    CONF_DEVICE_FINGERPRINT: data[CONF_DEVICE_FINGERPRINT],
+                    CUSTOMER_ID: data[CUSTOMER_ID],
+                    TOKEN: data[TOKEN],
+                    X_REMEMBER_ME_TOKEN: rememberMeTokenResp[TOKEN]
+                }
+                save_json(self.hass.config.path(PERSISTENCE), data)
+
             body = await getFlights(self, data)
 
             if (ACCESS_DENIED in body and body[CAUSE] == NOT_AUTHENTICATED) or (
                 TYPE in body and body[TYPE] == CLIENT_ERROR
             ):
-                refreshedToken = await refreshToken(self, data)
+                refreshedData = await refreshToken(self, data)
 
-                self.customerId = refreshedToken[CUSTOMER_ID]
-                self.token = refreshedToken[TOKEN]
-
-                body = await getFlights(self, data)
+                body = await getFlights(self, refreshedData)
 
         except InvalidAuth as err:
             raise ConfigEntryAuthFailed from err
@@ -200,26 +204,31 @@ class RyanairProfileCoordinator(DataUpdateCoordinator):
         )
 
         self.session = session
-        self.customerId = data[CUSTOMER_ID]
-        self.fingerprint = data[CONF_DEVICE_FINGERPRINT]
-        self.token = data[TOKEN]
 
     async def _async_update_data(self):
         """Fetch data from API endpoint."""
         try:
             data = load_json_object(self.hass.config.path(PERSISTENCE))
 
+            if X_REMEMBER_ME_TOKEN not in data:
+                rememberMeTokenResp = await rememberMeToken(self, data)
+
+                data = {
+                    CONF_DEVICE_FINGERPRINT: data[CONF_DEVICE_FINGERPRINT],
+                    CUSTOMER_ID: data[CUSTOMER_ID],
+                    TOKEN: data[TOKEN],
+                    X_REMEMBER_ME_TOKEN: rememberMeTokenResp[TOKEN]
+                }
+                save_json(self.hass.config.path(PERSISTENCE), data)
+
             body = await getUserProfile(self, data)
 
             if (ACCESS_DENIED in body and body[CAUSE] == NOT_AUTHENTICATED) or (
                 TYPE in body and body[TYPE] == CLIENT_ERROR
             ):
-                refreshedToken = await refreshToken(self, data)
+                refreshedData = await refreshToken(self, data)
 
-                self.customerId = refreshedToken[CUSTOMER_ID]
-                self.token = refreshedToken[TOKEN]
-
-                body = await getUserProfile(self, data)
+                body = await getUserProfile(self, refreshedData)
 
         except InvalidAuth as err:
             raise ConfigEntryAuthFailed from err

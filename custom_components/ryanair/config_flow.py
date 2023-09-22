@@ -178,7 +178,8 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         errors = {}
         placeholder = ""
 
-        unique_id = hashlib.md5(user_input[CONF_EMAIL].encode("UTF-8")).hexdigest()
+        unique_id = hashlib.md5(
+            user_input[CONF_EMAIL].encode("UTF-8")).hexdigest()
         self._fingerprint = str(uuid.UUID(hex=unique_id))
         self._email = user_input[CONF_EMAIL]
 
@@ -214,7 +215,8 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                             CUSTOMER_ID: info["data"][CUSTOMER_ID],
                             TOKEN: info["data"][TOKEN],
                         }
-                        save_json(self.hass.config.path(PERSISTENCE), ryanairData)
+                        save_json(self.hass.config.path(
+                            PERSISTENCE), ryanairData)
                         return self.async_create_entry(
                             title=info["title"], data=ryanairData
                         )
