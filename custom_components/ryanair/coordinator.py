@@ -7,6 +7,8 @@ from homeassistant.helpers.update_coordinator import (
     DataUpdateCoordinator,
     UpdateFailed,
 )
+import re
+from aztec_code_generator import AztecCode
 from .const import (
     HOST,
     USER_PROFILE,
@@ -34,7 +36,10 @@ from .const import (
     CAUSE,
     NOT_AUTHENTICATED,
     CLIENT_ERROR,
-    TYPE
+    TYPE,
+    BOARDING_PASS_URL,
+    EMAIL,
+    RECORD_LOCATOR
 )
 from .errors import RyanairError, InvalidAuth, APIRatelimitExceeded, UnknownError
 from homeassistant.exceptions import ConfigEntryAuthFailed
@@ -126,6 +131,104 @@ async def getUserProfile(self, data):
     body = await resp.json()
 
     return body
+
+
+async def getBoardingPasses(self, data, headers):
+    resp = await self.session.request(
+        method="POST",
+        url=BOARDING_PASS_URL,
+        headers={
+            "Content-Type": CONTENT_TYPE_JSON,
+            CONF_DEVICE_FINGERPRINT: data[CONF_DEVICE_FINGERPRINT],
+            CONF_AUTH_TOKEN: data[TOKEN],
+        },
+        json={
+            EMAIL: headers[EMAIL],
+            RECORD_LOCATOR: headers[RECORD_LOCATOR]
+        }
+    )
+    body = await resp.json()
+
+    return body
+
+
+class RyanairBoardingPassCoordinator(DataUpdateCoordinator):
+    """Boarding Pass Coordinator"""
+
+    def __init__(self, hass: HomeAssistant, session, data) -> None:
+        """Initialize coordinator."""
+
+        super().__init__(
+            hass,
+            _LOGGER,
+            # Name of the data. For logging purposes.
+            name="Ryanair",
+            # Polling interval. Will only be polled if there are subscribers.
+            update_interval=timedelta(seconds=300),
+        )
+        self.email = data[EMAIL]
+        self.record_locator = data[RECORD_LOCATOR]
+        self.session = session
+
+    async def _async_update_data(self):
+        """Fetch data from API endpoint."""
+        try:
+            data = load_json_object(self.hass.config.path(PERSISTENCE))
+
+            if X_REMEMBER_ME_TOKEN not in data:
+                rememberMeTokenResp = await rememberMeToken(self, data)
+
+                data = {
+                    CONF_DEVICE_FINGERPRINT: data[CONF_DEVICE_FINGERPRINT],
+                    CUSTOMER_ID: data[CUSTOMER_ID],
+                    TOKEN: data[TOKEN],
+                    X_REMEMBER_ME_TOKEN: rememberMeTokenResp[TOKEN]
+                }
+                save_json(self.hass.config.path(PERSISTENCE), data)
+
+            headers = {
+                EMAIL: self.email,
+                RECORD_LOCATOR: self.record_locator
+            }
+
+            body = await getBoardingPasses(self, data, headers)
+
+            if (ACCESS_DENIED in body and body[CAUSE] == NOT_AUTHENTICATED) or (
+                TYPE in body and body[TYPE] == CLIENT_ERROR
+            ):
+                refreshedData = await refreshToken(self, data)
+
+                headers = {
+                    EMAIL: self.email,
+                    RECORD_LOCATOR: self.record_locator
+                }
+
+                body = await getBoardingPasses(self, refreshedData, headers)
+
+            for boardingPass in body:
+                aztec_code = AztecCode(boardingPass['barcode'])
+                fileName = re.sub(
+                    "[\W_]", "", boardingPass['barcode']) + ".png"
+
+                aztec_code.save(
+                    "homeassistant/components/ryanair/" + fileName, module_size=16)
+
+        except InvalidAuth as err:
+            raise ConfigEntryAuthFailed from err
+        except RyanairError as err:
+            raise UpdateFailed(str(err)) from err
+        except ValueError as err:
+            err_str = str(err)
+
+            if "Invalid authentication credentials" in err_str:
+                raise InvalidAuth from err
+            if "API rate limit exceeded." in err_str:
+                raise APIRatelimitExceeded from err
+
+            _LOGGER.exception("Unexpected exception")
+            raise UnknownError from err
+
+        return body
 
 
 class RyanairFlightsCoordinator(DataUpdateCoordinator):

@@ -13,7 +13,9 @@ from .const import (
     NOT_AUTHENTICATED,
     OPEN_TIME,
     CLOSE_TIME,
-    TYPE
+    TYPE,
+    EMAIL,
+    RECORD_LOCATOR
 )
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.entity import DeviceInfo
@@ -28,8 +30,8 @@ from homeassistant.helpers.update_coordinator import (
 )
 from homeassistant.util import dt as dt_util
 from datetime import datetime
-from .coordinator import RyanairProfileCoordinator, RyanairFlightsCoordinator
-from homeassistant.util.json import JsonObjectType
+from .coordinator import RyanairProfileCoordinator, RyanairFlightsCoordinator, RyanairBoardingPassCoordinator
+from homeassistant.util.json import JsonObjectType, JsonArrayType
 _LOGGER = logging.getLogger(__name__)
 # Time between updating data from GitHub
 SCAN_INTERVAL = timedelta(minutes=10)
@@ -88,20 +90,34 @@ async def async_setup_entry(
             seats = item["rawBooking"]["seats"]
             passengers = item["rawBooking"]["passengers"]
 
+            checkInComplete = False
             for flight in flights:
                 flightSeats = []
                 for seat in seats:
                     if seat["journeyNum"] == flight["journeyNum"]:
+                        checkedInPassengers = []
                         for passenger in passengers:
+                            if "checkins" in item["rawBooking"] and len(item["rawBooking"]["checkins"]) > 0:
+                                for checkin in item["rawBooking"]["checkins"]:
+                                    if checkin["journeyNum"] == flight["journeyNum"] and checkin["paxNum"] == passenger["paxNum"] and checkin["status"] == "checkin":
+                                        checkedInPassengers.append(checkin)
+
                             if seat["paxNum"] == passenger["paxNum"]:
-                                flightSeats.append(
-                                    passenger["firstName"]
+                                checkedIn = False
+                                for checkInPassenger in checkedInPassengers:
+                                    if checkInPassenger["paxNum"] == passenger["paxNum"]:
+                                        checkedIn = True
+
+                                flightSeats.append({
+                                    "name": passenger["firstName"]
                                     + " "
-                                    + passenger["lastName"]
-                                    + " ("
-                                    + seat["code"]
-                                    + ")"
-                                )
+                                    + passenger["lastName"],
+                                    "seat": seat["code"],
+                                    "checked-in": checkedIn
+                                })
+
+                        if len(checkedInPassengers) == len(passengers):
+                            checkInComplete = True
 
                 name = flight["flightNumber"] + \
                     " (" + flight["origin"] + " - " + \
@@ -112,7 +128,7 @@ async def async_setup_entry(
                     name=name,
                 )
                 sensors.append(RyanairFlightSensor(
-                    flightsCoordinator, bookingRef, flight, flightSeats, name, flightDescription))
+                    flightsCoordinator, bookingRef, flight, flightSeats, name, checkInComplete, flightDescription))
 
     async_add_entities(sensors, update_before_add=True)
 
@@ -153,20 +169,34 @@ async def async_setup_platform(
             seats = item["rawBooking"]["seats"]
             passengers = item["rawBooking"]["passengers"]
 
+            checkInComplete = False
             for flight in flights:
                 flightSeats = []
                 for seat in seats:
                     if seat["journeyNum"] == flight["journeyNum"]:
+                        checkedInPassengers = []
                         for passenger in passengers:
+                            if "checkins" in item["rawBooking"] and len(item["rawBooking"]["checkins"]) > 0:
+                                for checkin in item["rawBooking"]["checkins"]:
+                                    if checkin["journeyNum"] == flight["journeyNum"] and checkin["paxNum"] == passenger["paxNum"] and checkin["status"] == "checkin":
+                                        checkedInPassengers.append(checkin)
+
                             if seat["paxNum"] == passenger["paxNum"]:
-                                flightSeats.append(
-                                    passenger["firstName"]
+                                checkedIn = False
+                                for checkInPassenger in checkedInPassengers:
+                                    if checkInPassenger["paxNum"] == passenger["paxNum"]:
+                                        checkedIn = True
+
+                                flightSeats.append({
+                                    "name": passenger["firstName"]
                                     + " "
-                                    + passenger["lastName"]
-                                    + " ("
-                                    + seat["code"]
-                                    + ")"
-                                )
+                                    + passenger["lastName"],
+                                    "seat": seat["code"],
+                                    "checked-in": checkedIn
+                                })
+
+                        if len(checkedInPassengers) == len(passengers):
+                            checkInComplete = True
 
                 name = flight["flightNumber"] + \
                     " (" + flight["origin"] + " - " + \
@@ -177,9 +207,77 @@ async def async_setup_platform(
                     name=name,
                 )
                 sensors.append(RyanairFlightSensor(
-                    flightsCoordinator, bookingRef, flight, flightSeats, name, flightDescription))
+                    flightsCoordinator, bookingRef, flight, flightSeats, name, checkInComplete, flightDescription))
 
     async_add_entities(sensors, update_before_add=True)
+
+
+class RyanairBoardingPassSensor(CoordinatorEntity[RyanairBoardingPassCoordinator], SensorEntity):
+    """Ryanair Boarding Pass Sensor"""
+
+    def __init__(
+        self,
+        coordinator: RyanairBoardingPassCoordinator,
+        bookingRef: str,
+        name: str,
+        description: SensorEntityDescription,
+    ) -> None:
+        """Initialize."""
+        super().__init__(coordinator)
+        self.bookingRef = bookingRef
+        self._attr_device_info = deviceInfo(self.bookingRef)
+        self._attr_unique_id = f"Ryanair_boarding_pass{self.bookingRef}-{name}-{description.key}".lower(
+        )
+        self._attrs: dict[str, Any] = {}
+        self.entity_description = description
+        self._state = None
+        self._name = name
+        self._available = True
+
+    @property
+    def name(self) -> str:
+        """Return the name of the entity."""
+        return self._name
+
+    @property
+    def unique_id(self) -> str:
+        """Return the unique ID of the sensor."""
+        return self._attr_unique_id
+
+    @property
+    def available(self) -> bool:
+        """Return True if entity is available."""
+        return self._available
+
+    @property
+    def native_value(self) -> str:
+        return self._state
+
+    @property
+    def icon(self) -> str:
+        """Return a representative icon."""
+        return "mdi:qrcode"
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+
+        for key in self.coordinator.data:
+            self._attrs["name"] = key["name"]
+        return self._attrs
+
+    async def async_update(self) -> None:
+        """Update the entity.
+
+        Only used by the generic entity update service.
+        """
+        try:
+            self._state = str("BP")
+            self._available = True
+        except ClientError:
+            self._available = False
+            _LOGGER.exception(
+                "Error retrieving data from Ryanair for sensor %s", self.name
+            )
 
 
 class RyanairFlightSensor(CoordinatorEntity[RyanairFlightsCoordinator], SensorEntity):
@@ -190,14 +288,16 @@ class RyanairFlightSensor(CoordinatorEntity[RyanairFlightsCoordinator], SensorEn
         coordinator: RyanairFlightsCoordinator,
         bookingRef: str,
         flight: JsonObjectType,
-        seats: JsonObjectType,
+        seats: JsonArrayType,
         name: str,
+        checkInComplete: bool,
         description: SensorEntityDescription,
     ) -> None:
         """Initialize."""
         super().__init__(coordinator)
         self.bookingRef = bookingRef
         self.flight = flight
+        self.checkInComplete = checkInComplete
         self._attr_device_info = deviceInfo(self.bookingRef)
         self._attr_unique_id = f"Ryanair_flight{self.bookingRef}-{name}-{description.key}".lower()
         self._attrs: dict[str, Any] = {}
@@ -257,20 +357,24 @@ class RyanairFlightSensor(CoordinatorEntity[RyanairFlightsCoordinator], SensorEn
         """
         try:
 
-            now_utc = dt_util.utcnow().timestamp()
-
-            checkInOpenUTC = datetime.strptime(
-                self.flight["checkInOpenUTC"], "%Y-%m-%dT%H:%M:%SZ").timestamp()
-
-            checkInCloseUTC = datetime.strptime(
-                self.flight["checkInCloseUTC"], "%Y-%m-%dT%H:%M:%SZ").timestamp()
-
-            if now_utc < checkInOpenUTC:
-                state = "Check in not open"
-            elif now_utc >= checkInOpenUTC and now_utc <= checkInCloseUTC:
-                state = "Check in open"
+            if self.checkInComplete == True:
+                state = "Checked-in"
             else:
-                state = "Check in closed"
+
+                now_utc = dt_util.utcnow().timestamp()
+
+                checkInOpenUTC = datetime.strptime(
+                    self.flight["checkInOpenUTC"], "%Y-%m-%dT%H:%M:%SZ").timestamp()
+
+                checkInCloseUTC = datetime.strptime(
+                    self.flight["checkInCloseUTC"], "%Y-%m-%dT%H:%M:%SZ").timestamp()
+
+                if now_utc < checkInOpenUTC:
+                    state = "Check-in not open"
+                elif now_utc >= checkInOpenUTC and now_utc <= checkInCloseUTC:
+                    state = "Check-in open"
+                else:
+                    state = "Check-in closed"
 
             self._state = state
             self._available = True
