@@ -11,15 +11,17 @@ from .const import (
     ACCESS_DENIED,
     CAUSE,
     NOT_AUTHENTICATED,
-    OPEN_TIME,
-    CLOSE_TIME,
+    BOOKING_REFERENCES,
+    BOARDING_PASS_HEADERS,
     TYPE,
     EMAIL,
-    RECORD_LOCATOR
+    LOCAL_FOLDER
 )
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.util.json import load_json_object
+from homeassistant.helpers.json import save_json
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.components.sensor import (
     SensorEntity,
@@ -30,18 +32,19 @@ from homeassistant.helpers.update_coordinator import (
 )
 from homeassistant.util import dt as dt_util
 from datetime import datetime
-from .coordinator import RyanairProfileCoordinator, RyanairFlightsCoordinator, RyanairBoardingPassCoordinator
+from .coordinator import RyanairProfileCoordinator, RyanairFlightsCoordinator
 from homeassistant.util.json import JsonObjectType, JsonArrayType
 _LOGGER = logging.getLogger(__name__)
 # Time between updating data from GitHub
 SCAN_INTERVAL = timedelta(minutes=10)
+BOARDING_PASS_PERSISTENCE = LOCAL_FOLDER + BOARDING_PASS_HEADERS
 
 
-def deviceInfo(bookingRef) -> DeviceInfo:
+def deviceInfo(name) -> DeviceInfo:
     return DeviceInfo(
-        identifiers={(DOMAIN, f"Ryanair_{bookingRef}")},
+        identifiers={(DOMAIN, f"Ryanair_{name}")},
         manufacturer="Ryanair",
-        name=bookingRef,
+        name=name,
         configuration_url="https://github.com/jampez77/Ryanair/",
     )
 
@@ -79,56 +82,133 @@ async def async_setup_entry(
     sensors = []
 
     if (ACCESS_DENIED not in profileCoordinator.data and CAUSE not in profileCoordinator.data and TYPE not in profileCoordinator.data):
+        data = load_json_object(BOARDING_PASS_PERSISTENCE)
+
+        if BOOKING_REFERENCES in data:
+            data = {
+                EMAIL: profileCoordinator.data["email"],
+                BOOKING_REFERENCES: data[BOOKING_REFERENCES]
+            }
+        else:
+            data = {
+                EMAIL: profileCoordinator.data["email"]
+            }
+        save_json(BOARDING_PASS_PERSISTENCE, data)
+
         sensors.append(RyanairProfileSensor(
             profileCoordinator, name, profileDescription))
 
     if "items" in flightsCoordinator.data and len(flightsCoordinator.data["items"]) > 0:
+        boardingPasses = []
         for item in flightsCoordinator.data["items"]:
 
             flights = item["rawBooking"]["flights"]
             bookingRef = item["rawBooking"]["recordLocator"]
+            boardingPasses.append(bookingRef)
             seats = item["rawBooking"]["seats"]
             passengers = item["rawBooking"]["passengers"]
 
-            checkInComplete = False
+            itinerary = {
+                "status": item["rawBooking"]["status"],
+                "bookingRef": bookingRef,
+                "journeys": []
+            }
             for flight in flights:
-                flightSeats = []
-                for seat in seats:
-                    if seat["journeyNum"] == flight["journeyNum"]:
-                        checkedInPassengers = []
-                        for passenger in passengers:
-                            if "checkins" in item["rawBooking"] and len(item["rawBooking"]["checkins"]) > 0:
-                                for checkin in item["rawBooking"]["checkins"]:
-                                    if checkin["journeyNum"] == flight["journeyNum"] and checkin["paxNum"] == passenger["paxNum"] and checkin["status"] == "checkin":
-                                        checkedInPassengers.append(checkin)
 
-                            if seat["paxNum"] == passenger["paxNum"]:
-                                checkedIn = False
-                                for checkInPassenger in checkedInPassengers:
-                                    if checkInPassenger["paxNum"] == passenger["paxNum"]:
-                                        checkedIn = True
+                journey = {
+                    "checkInOpen": flight["checkInOpenUTC"],
+                    "checkInClose": flight["checkInCloseUTC"],
+                    "checkInComplete": False,
+                    "flights": []
+                }
 
-                                flightSeats.append({
-                                    "name": passenger["firstName"]
-                                    + " "
-                                    + passenger["lastName"],
-                                    "seat": seat["code"],
-                                    "checked-in": checkedIn
-                                })
+                segments = flight["segments"]
 
-                        if len(checkedInPassengers) == len(passengers):
-                            checkInComplete = True
+                for segment in segments:
+                    segmentInfo = {
+                        "destination": segment["destination"],
+                        "origin": segment["origin"],
+                        "flightNumber": segment["flightNumber"],
+                        "isCancelled": segment["isCancelled"],
+                        "arrive": segment["times"]["arriveUTC"],
+                        "depart": segment["times"]["departUTC"],
+                        "checkInComplete": False,
+                        "passengers": []
+                    }
+                    segmentPassengers = []
+                    checkedInPassengers = []
+                    for seat in seats:
+                        if seat["journeyNum"] == flight["journeyNum"] and seat["segmentNum"] == segment["segmentNum"]:
+                            for passenger in passengers:
+                                if seat["paxNum"] == passenger["paxNum"]:
+                                    passengerInfo = {
+                                        "code": seat["code"],
+                                        "title": passenger["title"],
+                                        "firstName": passenger["firstName"],
+                                        "middleName": passenger["middleName"],
+                                        "lastName": passenger["lastName"],
+                                        "checkedIn": False
+                                    }
+                                    if "checkins" in item["rawBooking"] and len(item["rawBooking"]["checkins"]) > 0:
+                                        for checkin in item["rawBooking"]["checkins"]:
+                                            if checkin["journeyNum"] == flight["journeyNum"] and checkin["paxNum"] == passenger["paxNum"] and checkin["status"] == "checkin":
+                                                checkedInPassengers.append(
+                                                    checkin)
+                                                passengerInfo["checkedIn"] = True
+                                    segmentPassengers.append(passengerInfo)
 
-                name = flight["flightNumber"] + \
-                    " (" + flight["origin"] + " - " + \
-                    flight["destination"] + ")"
+                                if len(checkedInPassengers) == len(segmentPassengers):
+                                    segmentInfo["checkInComplete"] = True
 
-                flightDescription = SensorEntityDescription(
-                    key=f"Ryanair_flight{name}",
-                    name=name,
-                )
-                sensors.append(RyanairFlightSensor(
-                    flightsCoordinator, bookingRef, flight, flightSeats, name, checkInComplete, flightDescription))
+                            if len(checkedInPassengers) == len(passengers):
+                                journey["checkInComplete"] = True
+
+                    segmentInfo["passengers"] = segmentPassengers
+                    journey["flights"].insert(
+                        segment["segmentNum"], segmentInfo)
+
+                itinerary["journeys"].insert(flight["journeyNum"], journey)
+
+                upcomingFlights = 0
+                for journey in itinerary["journeys"]:
+
+                    checkInInfo = {
+                        "checkInOpen": journey["checkInOpen"],
+                        "checkInClose": journey["checkInClose"],
+                    }
+                    upcomingFlights = upcomingFlights + len(journey["flights"])
+                    for flight in journey["flights"]:
+
+                        flightDescription = SensorEntityDescription(
+                            key=f"Ryanair_flight{name}",
+                            name=name,
+                        )
+
+                        sensors.append(RyanairFlightSensor(
+                            flightsCoordinator, bookingRef, checkInInfo, flight, flightDescription))
+
+            flightCountDescription = SensorEntityDescription(
+                key=f"Ryanair_flight-count{name}",
+                name="Upcoming Flights",
+            )
+
+            name = profileCoordinator.data["firstName"] + \
+                " " + profileCoordinator.data["lastName"]
+            sensors.append(RyanairFlightCountSensor(
+                bookingRef, upcomingFlights, name, flightCountDescription))
+
+        data = load_json_object(BOARDING_PASS_PERSISTENCE)
+
+        if EMAIL in data:
+            data = {
+                EMAIL: data[EMAIL],
+                BOOKING_REFERENCES: boardingPasses
+            }
+        else:
+            data = {
+                BOOKING_REFERENCES: boardingPasses
+            }
+        save_json(BOARDING_PASS_PERSISTENCE, data)
 
     async_add_entities(sensors, update_before_add=True)
 
@@ -169,69 +249,117 @@ async def async_setup_platform(
             seats = item["rawBooking"]["seats"]
             passengers = item["rawBooking"]["passengers"]
 
-            checkInComplete = False
+            itinerary = {
+                "status": item["rawBooking"]["status"],
+                "bookingRef": bookingRef,
+                "journeys": []
+            }
             for flight in flights:
-                flightSeats = []
-                for seat in seats:
-                    if seat["journeyNum"] == flight["journeyNum"]:
-                        checkedInPassengers = []
-                        for passenger in passengers:
-                            if "checkins" in item["rawBooking"] and len(item["rawBooking"]["checkins"]) > 0:
-                                for checkin in item["rawBooking"]["checkins"]:
-                                    if checkin["journeyNum"] == flight["journeyNum"] and checkin["paxNum"] == passenger["paxNum"] and checkin["status"] == "checkin":
-                                        checkedInPassengers.append(checkin)
 
-                            if seat["paxNum"] == passenger["paxNum"]:
-                                checkedIn = False
-                                for checkInPassenger in checkedInPassengers:
-                                    if checkInPassenger["paxNum"] == passenger["paxNum"]:
-                                        checkedIn = True
+                journey = {
+                    "checkInOpen": flight["checkInOpenUTC"],
+                    "checkInClose": flight["checkInCloseUTC"],
+                    "checkInComplete": False,
+                    "flights": []
+                }
 
-                                flightSeats.append({
-                                    "name": passenger["firstName"]
-                                    + " "
-                                    + passenger["lastName"],
-                                    "seat": seat["code"],
-                                    "checked-in": checkedIn
-                                })
+                segments = flight["segments"]
 
-                        if len(checkedInPassengers) == len(passengers):
-                            checkInComplete = True
+                for segment in segments:
+                    segmentInfo = {
+                        "destination": segment["destination"],
+                        "origin": segment["origin"],
+                        "flightNumber": segment["flightNumber"],
+                        "isCancelled": segment["isCancelled"],
+                        "arrive": segment["times"]["arriveUTC"],
+                        "depart": segment["times"]["departUTC"],
+                        "checkInComplete": False,
+                        "passengers": []
+                    }
+                    segmentPassengers = []
+                    checkedInPassengers = []
+                    for seat in seats:
+                        if seat["journeyNum"] == flight["journeyNum"] and seat["segmentNum"] == segment["segmentNum"]:
+                            for passenger in passengers:
+                                if seat["paxNum"] == passenger["paxNum"]:
+                                    passengerInfo = {
+                                        "code": seat["code"],
+                                        "title": passenger["title"],
+                                        "firstName": passenger["firstName"],
+                                        "middleName": passenger["middleName"],
+                                        "lastName": passenger["lastName"],
+                                        "checkedIn": False
+                                    }
+                                    if "checkins" in item["rawBooking"] and len(item["rawBooking"]["checkins"]) > 0:
+                                        for checkin in item["rawBooking"]["checkins"]:
+                                            if checkin["journeyNum"] == flight["journeyNum"] and checkin["paxNum"] == passenger["paxNum"] and checkin["status"] == "checkin":
+                                                checkedInPassengers.append(
+                                                    checkin)
+                                                passengerInfo["checkedIn"] = True
+                                    segmentPassengers.append(passengerInfo)
 
-                name = flight["flightNumber"] + \
-                    " (" + flight["origin"] + " - " + \
-                    flight["destination"] + ")"
+                                if len(checkedInPassengers) == len(segmentPassengers):
+                                    segmentInfo["checkInComplete"] = True
 
-                flightDescription = SensorEntityDescription(
-                    key=f"Ryanair_flight{name}",
-                    name=name,
-                )
-                sensors.append(RyanairFlightSensor(
-                    flightsCoordinator, bookingRef, flight, flightSeats, name, checkInComplete, flightDescription))
+                            if len(checkedInPassengers) == len(passengers):
+                                journey["checkInComplete"] = True
+
+                    segmentInfo["passengers"] = segmentPassengers
+                    journey["flights"].insert(
+                        segment["segmentNum"], segmentInfo)
+
+                itinerary["journeys"].insert(flight["journeyNum"], journey)
+
+                upcomingFlights = 0
+                for journey in itinerary["journeys"]:
+
+                    checkInInfo = {
+                        "checkInOpen": journey["checkInOpen"],
+                        "checkInClose": journey["checkInClose"],
+                    }
+                    upcomingFlights = upcomingFlights + len(journey["flights"])
+                    for flight in journey["flights"]:
+
+                        flightDescription = SensorEntityDescription(
+                            key=f"Ryanair_flight{name}",
+                            name=name,
+                        )
+
+                        sensors.append(RyanairFlightSensor(
+                            flightsCoordinator, bookingRef, checkInInfo, flight, flightDescription))
+
+            flightCountDescription = SensorEntityDescription(
+                key=f"Ryanair_flight-count{name}",
+                name="Upcoming Flights",
+            )
+
+            name = profileCoordinator.data["firstName"] + \
+                " " + profileCoordinator.data["lastName"]
+            sensors.append(RyanairFlightCountSensor(
+                bookingRef, upcomingFlights, name, flightCountDescription))
 
     async_add_entities(sensors, update_before_add=True)
 
 
-class RyanairBoardingPassSensor(CoordinatorEntity[RyanairBoardingPassCoordinator], SensorEntity):
-    """Ryanair Boarding Pass Sensor"""
+class RyanairFlightCountSensor(SensorEntity):
+    """Ryanair Check In Sensor"""
 
     def __init__(
         self,
-        coordinator: RyanairBoardingPassCoordinator,
         bookingRef: str,
+        upcomingFlights: int,
         name: str,
         description: SensorEntityDescription,
     ) -> None:
         """Initialize."""
-        super().__init__(coordinator)
+        self._name = "Upcoming Flights"
         self.bookingRef = bookingRef
-        self._attr_device_info = deviceInfo(self.bookingRef)
-        self._attr_unique_id = f"Ryanair_boarding_pass{self.bookingRef}-{name}-{description.key}".lower(
+        self._attr_device_info = self._attr_device_info = deviceInfo(name)
+        self._attr_unique_id = f"Ryanair_flight-count-{self.bookingRef}-{name}-{description.key}".lower(
         )
         self._attrs: dict[str, Any] = {}
         self.entity_description = description
-        self._state = None
-        self._name = name
+        self._state = upcomingFlights
         self._available = True
 
     @property
@@ -256,14 +384,7 @@ class RyanairBoardingPassSensor(CoordinatorEntity[RyanairBoardingPassCoordinator
     @property
     def icon(self) -> str:
         """Return a representative icon."""
-        return "mdi:qrcode"
-
-    @property
-    def extra_state_attributes(self) -> dict[str, Any]:
-
-        for key in self.coordinator.data:
-            self._attrs["name"] = key["name"]
-        return self._attrs
+        return "mdi:airplane-clock"
 
     async def async_update(self) -> None:
         """Update the entity.
@@ -271,7 +392,6 @@ class RyanairBoardingPassSensor(CoordinatorEntity[RyanairBoardingPassCoordinator
         Only used by the generic entity update service.
         """
         try:
-            self._state = str("BP")
             self._available = True
         except ClientError:
             self._available = False
@@ -287,25 +407,30 @@ class RyanairFlightSensor(CoordinatorEntity[RyanairFlightsCoordinator], SensorEn
         self,
         coordinator: RyanairFlightsCoordinator,
         bookingRef: str,
+        checkInInfo: JsonObjectType,
         flight: JsonObjectType,
-        seats: JsonArrayType,
-        name: str,
-        checkInComplete: bool,
         description: SensorEntityDescription,
     ) -> None:
         """Initialize."""
         super().__init__(coordinator)
-        self.bookingRef = bookingRef
         self.flight = flight
-        self.checkInComplete = checkInComplete
-        self._attr_device_info = deviceInfo(self.bookingRef)
-        self._attr_unique_id = f"Ryanair_flight{self.bookingRef}-{name}-{description.key}".lower()
+
+        name = self.flight["flightNumber"] + \
+            " (" + self.flight["origin"] + " - " + \
+            self.flight["destination"] + ")"
+        self.bookingRef = bookingRef
+        self.checkInInfo = checkInInfo
+        self.checkInComplete = self.flight["checkInComplete"]
+        self._attr_device_info = deviceInfo(
+            self.bookingRef + " " + self.flight["flightNumber"])
+        self._attr_unique_id = f"Ryanair_flight-{self.flight['flightNumber']}-{self.bookingRef}-{name}-{description.key}".lower(
+        )
         self._attrs: dict[str, Any] = {}
         self.entity_description = description
         self._state = None
         self._name = name
         self._available = True
-        self.seats = seats
+        self.passengers = self.flight["passengers"]
 
     @property
     def name(self) -> str:
@@ -338,13 +463,12 @@ class RyanairFlightSensor(CoordinatorEntity[RyanairFlightsCoordinator], SensorEn
             "flightNumber": self.flight["flightNumber"],
             "origin": self.flight["origin"],
             "destination": self.flight["destination"],
-            "arrive": self.flight["times"]["arriveUTC"],
-            "depart": self.flight["times"]["departUTC"],
-            "checkInOpen": self.flight["checkInOpenUTC"],
-            "checkInClose": self.flight["checkInCloseUTC"],
-            "checkInFreeAllocateOpen": self.flight["checkInFreeAllocateOpenUtcDate"],
-            "isCancelled": self.flight["segments"][0]["isCancelled"],
-            "seats": self.seats
+            "arrive": self.flight["arrive"],
+            "depart": self.flight["depart"],
+            "checkInOpen": self.checkInInfo["checkInOpen"],
+            "checkInClose": self.checkInInfo["checkInClose"],
+            "isCancelled": self.flight["isCancelled"],
+            "passengers": self.passengers
         }
 
         self._attrs = attrs
@@ -364,10 +488,10 @@ class RyanairFlightSensor(CoordinatorEntity[RyanairFlightsCoordinator], SensorEn
                 now_utc = dt_util.utcnow().timestamp()
 
                 checkInOpenUTC = datetime.strptime(
-                    self.flight["checkInOpenUTC"], "%Y-%m-%dT%H:%M:%SZ").timestamp()
+                    self.flight["checkInOpen"], "%Y-%m-%dT%H:%M:%SZ").timestamp()
 
                 checkInCloseUTC = datetime.strptime(
-                    self.flight["checkInCloseUTC"], "%Y-%m-%dT%H:%M:%SZ").timestamp()
+                    self.flight["checkInClose"], "%Y-%m-%dT%H:%M:%SZ").timestamp()
 
                 if now_utc < checkInOpenUTC:
                     state = "Check-in not open"
@@ -397,14 +521,9 @@ class RyanairProfileSensor(CoordinatorEntity[RyanairProfileCoordinator], SensorE
         """Initialize."""
         super().__init__(coordinator)
 
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, f"Ryanair_{name}")},
-            manufacturer="Ryanair",
-            name=self.coordinator.data["firstName"]
-            + " "
-            + self.coordinator.data["lastName"],
-            configuration_url="https://github.com/jampez77/Ryanair/",
-        )
+        self._attr_device_info = deviceInfo(self.coordinator.data["firstName"]
+                                            + " "
+                                            + self.coordinator.data["lastName"])
         self._attr_unique_id = f"Ryanair_{name}-{description.key}".lower()
         self._attrs: dict[str, Any] = {}
         self.entity_description = description

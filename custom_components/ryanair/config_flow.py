@@ -23,12 +23,14 @@ from .const import (
     MFA_CODE,
     CODE_MFA_CODE_WRONG,
     PERSISTENCE,
+    LOCAL_FOLDER
 )
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from .coordinator import RyanairCoordinator, RyanairMfaCoordinator
 from .errors import CannotConnect, RyanairError
 
 _LOGGER = logging.getLogger(__name__)
+CREDENTIALS = LOCAL_FOLDER + PERSISTENCE
 
 STEP_USER_DATA_SCHEMA = vol.Schema(
     {
@@ -152,7 +154,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         CUSTOMER_ID: info["data"][CUSTOMER_ID],
                         TOKEN: info["data"][TOKEN],
                     }
-                    save_json(self.hass.config.path(PERSISTENCE), ryanairData)
+                    save_json(CREDENTIALS, ryanairData)
                     return self.async_create_entry(
                         title=info["title"], data=ryanairData
                     )
@@ -215,8 +217,8 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                             CUSTOMER_ID: info["data"][CUSTOMER_ID],
                             TOKEN: info["data"][TOKEN],
                         }
-                        save_json(self.hass.config.path(
-                            PERSISTENCE), ryanairData)
+
+                        save_json(CREDENTIALS, ryanairData)
                         return self.async_create_entry(
                             title=info["title"], data=ryanairData
                         )

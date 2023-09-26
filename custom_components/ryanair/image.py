@@ -1,5 +1,6 @@
 """Ryanair Boarding Pass"""
 from __future__ import annotations
+from datetime import datetime
 from homeassistant.helpers.entity import DeviceInfo
 from .coordinator import RyanairProfileCoordinator, RyanairFlightsCoordinator, RyanairBoardingPassCoordinator
 from homeassistant.util import dt as dt_util
@@ -10,18 +11,16 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.util.json import JsonObjectType
 import logging
+from io import BytesIO
 from pathlib import Path
 from .const import (
     DOMAIN,
-    CUSTOMER_ID,
-    ACCESS_DENIED,
-    CAUSE,
-    NOT_AUTHENTICATED,
-    OPEN_TIME,
-    CLOSE_TIME,
-    TYPE,
+    BOOKING_REFERENCES,
+    BOARDING_PASS_HEADERS,
     EMAIL,
-    RECORD_LOCATOR
+    RECORD_LOCATOR,
+    LOCAL_FOLDER,
+    BOARDING_PASSES_URI
 )
 from aiohttp import ClientError
 from typing import Any
@@ -30,10 +29,8 @@ from homeassistant.components.image import (
     ImageEntity,
     ImageEntityDescription,
 )
-from homeassistant.helpers.update_coordinator import (
-    CoordinatorEntity,
-)
-_LOGGER = logging.getLogger(__name__)
+from homeassistant.util.json import load_json_object
+BOARDING_PASS_PERSISTENCE = LOCAL_FOLDER + BOARDING_PASS_HEADERS
 
 
 def deviceInfo(bookingRef) -> DeviceInfo:
@@ -53,53 +50,42 @@ async def async_setup_platform(
 ) -> None:
     """Set up the sensor platform."""
     session = async_get_clientsession(hass)
-    profileCoordinator = RyanairProfileCoordinator(hass, session, config)
-
-    name = config[CUSTOMER_ID]
-
-    flightsCoordinator = RyanairFlightsCoordinator(hass, session, config)
-
-    name = config[CUSTOMER_ID]
 
     sensors = []
 
-    if "items" in flightsCoordinator.data and len(flightsCoordinator.data["items"]) > 0:
-        for item in flightsCoordinator.data["items"]:
+    data = load_json_object(BOARDING_PASS_PERSISTENCE)
 
-            flights = item["rawBooking"]["flights"]
-            bookingRef = item["rawBooking"]["recordLocator"]
-            seats = item["rawBooking"]["seats"]
-            passengers = item["rawBooking"]["passengers"]
+    if BOOKING_REFERENCES in data and EMAIL in data:
+        for bookingRef in data[BOOKING_REFERENCES]:
+            boardpassData = {
+                EMAIL: data[EMAIL],
+                RECORD_LOCATOR: bookingRef
+            }
+            boardPassCoordinator = RyanairBoardingPassCoordinator(
+                hass, session, boardpassData)
 
-            for flight in flights:
-                for seat in seats:
-                    if seat["journeyNum"] == flight["journeyNum"]:
-                        checkedInPassengers = []
-                        for passenger in passengers:
-                            if "checkins" in item["rawBooking"] and len(item["rawBooking"]["checkins"]) > 0:
-                                for checkin in item["rawBooking"]["checkins"]:
-                                    if checkin["journeyNum"] == flight["journeyNum"] and checkin["paxNum"] == passenger["paxNum"] and checkin["status"] == "checkin":
-                                        checkedInPassengers.append(checkin)
+            await boardPassCoordinator.async_refresh()
 
-                        if len(checkedInPassengers) == len(passengers):
+            for boardingPass in boardPassCoordinator.data:
+                flightName = "(" + boardingPass["flight"]["label"] + ") " + \
+                    boardingPass["departure"]["name"] + \
+                    " - " + boardingPass["arrival"]["name"]
 
-                            boardpassData = {
-                                EMAIL: profileCoordinator.data["email"],
-                                RECORD_LOCATOR: bookingRef
-                            }
-                            boardPassCoordinator = RyanairBoardingPassCoordinator(
-                                hass, session, boardpassData)
+                seat = boardingPass["seat"]["designator"]
 
-                            await boardPassCoordinator.async_refresh()
+                passenger = boardingPass["name"]["first"] + \
+                    " " + boardingPass["name"]["last"]
 
-                            boardingPassDescription = ImageEntityDescription(
-                                key=f"Ryanair_boarding_pass{name}",
-                                name=name,
-                            )
+                name = passenger + ": " + \
+                    flightName + "(" + seat + ")"
 
-                            for boardingPass in boardPassCoordinator.data:
-                                sensors.append(RyanairBoardingPassImage(hass,
-                                                                        boardingPass, bookingRef, name, boardingPassDescription))
+                boardingPassDescription = ImageEntityDescription(
+                    key=f"Ryanair_boarding_pass{name}",
+                    name=name,
+                )
+
+                sensors.append(RyanairBoardingPassImage(
+                    hass, boardingPass, bookingRef, name, boardingPassDescription))
 
     async_add_entities(sensors, update_before_add=True)
 
@@ -117,66 +103,41 @@ async def async_setup_entry(
 
     session = async_get_clientsession(hass)
 
-    profileCoordinator = RyanairProfileCoordinator(hass, session, entry.data)
-
-    await profileCoordinator.async_refresh()
-
-    flightsCoordinator = RyanairFlightsCoordinator(hass, session, config)
-
-    await flightsCoordinator.async_refresh()
-
     sensors = []
 
-    if "items" in flightsCoordinator.data and len(flightsCoordinator.data["items"]) > 0:
-        for item in flightsCoordinator.data["items"]:
+    data = load_json_object(BOARDING_PASS_PERSISTENCE)
 
-            flights = item["rawBooking"]["flights"]
-            bookingRef = item["rawBooking"]["recordLocator"]
-            seats = item["rawBooking"]["seats"]
-            passengers = item["rawBooking"]["passengers"]
+    if BOOKING_REFERENCES in data and EMAIL in data:
+        for bookingRef in data[BOOKING_REFERENCES]:
+            boardpassData = {
+                EMAIL: data[EMAIL],
+                RECORD_LOCATOR: bookingRef
+            }
+            boardPassCoordinator = RyanairBoardingPassCoordinator(
+                hass, session, boardpassData)
 
-            for flight in flights:
-                for seat in seats:
-                    if seat["journeyNum"] == flight["journeyNum"]:
-                        checkedInPassengers = []
-                        for passenger in passengers:
-                            if "checkins" in item["rawBooking"] and len(item["rawBooking"]["checkins"]) > 0:
-                                for checkin in item["rawBooking"]["checkins"]:
-                                    if checkin["journeyNum"] == flight["journeyNum"] and checkin["paxNum"] == passenger["paxNum"] and checkin["status"] == "checkin":
-                                        checkedInPassengers.append(passenger)
+            await boardPassCoordinator.async_refresh()
 
-            if len(checkedInPassengers) == len(passengers):
+            for boardingPass in boardPassCoordinator.data:
+                flightName = "(" + boardingPass["flight"]["label"] + ") " + \
+                    boardingPass["departure"]["name"] + \
+                    " - " + boardingPass["arrival"]["name"]
 
-                boardpassData = {
-                    EMAIL: profileCoordinator.data["email"],
-                    RECORD_LOCATOR: bookingRef
-                }
-                boardPassCoordinator = RyanairBoardingPassCoordinator(
-                    hass, session, boardpassData)
+                seat = boardingPass["seat"]["designator"]
 
-                await boardPassCoordinator.async_refresh()
+                passenger = boardingPass["name"]["first"] + \
+                    " " + boardingPass["name"]["last"]
 
-                for boardingPass in boardPassCoordinator.data:
-                    flightName = "(" + boardingPass["flight"]["label"] + ") " + \
-                        boardingPass["departure"]["name"] + \
-                        " - " + boardingPass["arrival"]["name"]
+                name = passenger + ": " + \
+                    flightName + "(" + seat + ")"
 
-                    seat = boardingPass["seat"]["designator"]
+                boardingPassDescription = ImageEntityDescription(
+                    key=f"Ryanair_boarding_pass{name}",
+                    name=name,
+                )
 
-                    passenger = boardingPass["name"]["first"] + \
-                        " " + boardingPass["name"]["last"]
-
-                    name = passenger + ": " + \
-                        flightName + "(" + seat + ")"
-
-                    boardingPassDescription = ImageEntityDescription(
-                        key=f"Ryanair_boarding_pass{name}",
-                        name=name,
-                    )
-
-                    if boardingPass["paxType"] != "INF":
-                        sensors.append(RyanairBoardingPassImage(hass,
-                                                                boardingPass, bookingRef, name, boardingPassDescription))
+                sensors.append(RyanairBoardingPassImage(
+                    hass, boardingPass, bookingRef, name, boardingPassDescription))
 
     async_add_entities(sensors, update_before_add=True)
 
@@ -195,22 +156,41 @@ class RyanairBoardingPassImage(ImageEntity):
         """Initialize."""
         super().__init__(hass)
         self.bookingRef = bookingRef
-        self._attr_device_info = deviceInfo(self.bookingRef)
-        self._attr_unique_id = f"Ryanair_boarding_pass-{self.bookingRef}-{name}-{description.key}".lower(
-        )
         self.boardingPassData = boardingPassData
+        flightNumber = self.boardingPassData["flight"]["carrierCode"] + \
+            self.boardingPassData["flight"]["number"]
+        self._attr_device_info = deviceInfo(
+            self.bookingRef + " " + flightNumber)
+        self._attr_unique_id = f"Ryanair_boarding_pass-{flightNumber}-{self.bookingRef}-{name}-{description.key}".lower(
+        )
+
         self._attrs: dict[str, Any] = {}
         self.entity_description = description
         self._state = None
         self._name = name
         self._available = True
-        fileName = re.sub(
-            "[\W_]", "", self.boardingPassData['barcode']) + ".png"
+        self._current_qr_bytes: bytes | None = None
+
+        print(self.name)
+        if self.boardingPassData["paxType"] != "INF":
+            fileName = BOARDING_PASSES_URI + re.sub(
+                "[\W_]", "", self.name + self.boardingPassData["departure"]["dateUTC"]) + ".png"
+        else:
+            fileName = "infant_qr.png"
 
         self.file_name = fileName
 
+    async def _fetch_image(self) -> bytes:
+        """Fetch the Image"""
+        image_path = Path(__file__).parent / self.file_name
+
+        qr_bytes = await self.hass.async_add_executor_job(image_path.read_bytes)
+
+        return qr_bytes
+
     async def async_added_to_hass(self):
         """Set the update time."""
+        self._current_qr_bytes = await self._fetch_image()
         self._attr_image_last_updated = dt_util.utcnow()
 
     async def async_image(self) -> bytes | None:
@@ -223,25 +203,13 @@ class RyanairBoardingPassImage(ImageEntity):
         """Return a representative icon."""
         return "mdi:qrcode"
 
-    @property
-    def extra_state_attributes(self) -> dict[str, Any]:
-
-        attrs = {
-            "name": self.boardingPassData["name"]
-        }
-        self._attrs = attrs
-        return self._attrs
-
     async def async_update(self) -> None:
-        """Update the entity.
+        """Update the image entity data."""
+        qr_bytes = await self._fetch_image()
 
-        Only used by the generic entity update service.
-        """
-        try:
-            self._state = str("BP")
-            self._available = True
-        except ClientError:
-            self._available = False
-            _LOGGER.exception(
-                "Error retrieving data from Ryanair for sensor %s", self.name
-            )
+        if self._current_qr_bytes is not None and qr_bytes is not None:
+            dt_now = dt_util.utcnow()
+            print("Aztec code has changed, reset image last updated property")
+            self._attr_image_last_updated = dt_now
+            self._current_qr_bytes = qr_bytes
+            self.async_write_ha_state()

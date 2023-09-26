@@ -39,17 +39,22 @@ from .const import (
     TYPE,
     BOARDING_PASS_URL,
     EMAIL,
-    RECORD_LOCATOR
+    RECORD_LOCATOR,
+    LOCAL_FOLDER,
+    BOARDING_PASSES_URI,
+    BOARDING_PASS_HEADERS
 )
 from .errors import RyanairError, InvalidAuth, APIRatelimitExceeded, UnknownError
 from homeassistant.exceptions import ConfigEntryAuthFailed
-from homeassistant.util.json import JsonArrayType, load_json_object
+from homeassistant.util.json import load_json_object
 from homeassistant.helpers.json import save_json
 
 _LOGGER = logging.getLogger(__name__)
 
 USER_PROFILE_URL = HOST + USER_PROFILE + V
 ORDERS_URL = HOST + ORDERS + V
+
+CREDENTIALS = LOCAL_FOLDER + PERSISTENCE
 
 
 async def rememberMeToken(self, data):
@@ -98,7 +103,7 @@ async def refreshToken(self, data):
         X_REMEMBER_ME_TOKEN: rememberMeTokenResp[TOKEN]
     }
 
-    save_json(self.hass.config.path(PERSISTENCE), ryanairData)
+    save_json(CREDENTIALS, ryanairData)
     return ryanairData
 
 
@@ -148,7 +153,7 @@ async def getBoardingPasses(self, data, headers):
         }
     )
     body = await resp.json()
-
+    print("getBoardingPasses")
     return body
 
 
@@ -164,7 +169,7 @@ class RyanairBoardingPassCoordinator(DataUpdateCoordinator):
             # Name of the data. For logging purposes.
             name="Ryanair",
             # Polling interval. Will only be polled if there are subscribers.
-            update_interval=timedelta(seconds=300),
+            update_interval=timedelta(seconds=30),
         )
         self.email = data[EMAIL]
         self.record_locator = data[RECORD_LOCATOR]
@@ -173,7 +178,7 @@ class RyanairBoardingPassCoordinator(DataUpdateCoordinator):
     async def _async_update_data(self):
         """Fetch data from API endpoint."""
         try:
-            data = load_json_object(self.hass.config.path(PERSISTENCE))
+            data = load_json_object(CREDENTIALS)
 
             if X_REMEMBER_ME_TOKEN not in data:
                 rememberMeTokenResp = await rememberMeToken(self, data)
@@ -184,7 +189,7 @@ class RyanairBoardingPassCoordinator(DataUpdateCoordinator):
                     TOKEN: data[TOKEN],
                     X_REMEMBER_ME_TOKEN: rememberMeTokenResp[TOKEN]
                 }
-                save_json(self.hass.config.path(PERSISTENCE), data)
+                save_json(CREDENTIALS, data)
 
             headers = {
                 EMAIL: self.email,
@@ -207,11 +212,24 @@ class RyanairBoardingPassCoordinator(DataUpdateCoordinator):
 
             for boardingPass in body:
                 aztec_code = AztecCode(boardingPass['barcode'])
-                fileName = re.sub(
-                    "[\W_]", "", boardingPass['barcode']) + ".png"
 
+                flightName = "(" + boardingPass["flight"]["label"] + ") " + \
+                    boardingPass["departure"]["name"] + \
+                    " - " + boardingPass["arrival"]["name"]
+
+                seat = boardingPass["seat"]["designator"]
+
+                passenger = boardingPass["name"]["first"] + \
+                    " " + boardingPass["name"]["last"]
+
+                name = passenger + ": " + \
+                    flightName + "(" + seat + ")"
+
+                fileName = re.sub(
+                    "[\W_]", "", name + boardingPass["departure"]["dateUTC"]) + ".png"
+                print("Saving Aztec")
                 aztec_code.save(
-                    "homeassistant/components/ryanair/" + fileName, module_size=16)
+                    LOCAL_FOLDER + BOARDING_PASSES_URI + fileName, module_size=16)
 
         except InvalidAuth as err:
             raise ConfigEntryAuthFailed from err
@@ -251,7 +269,7 @@ class RyanairFlightsCoordinator(DataUpdateCoordinator):
     async def _async_update_data(self):
         """Fetch data from API endpoint."""
         try:
-            data = load_json_object(self.hass.config.path(PERSISTENCE))
+            data = load_json_object(CREDENTIALS)
 
             if X_REMEMBER_ME_TOKEN not in data:
                 rememberMeTokenResp = await rememberMeToken(self, data)
@@ -262,7 +280,7 @@ class RyanairFlightsCoordinator(DataUpdateCoordinator):
                     TOKEN: data[TOKEN],
                     X_REMEMBER_ME_TOKEN: rememberMeTokenResp[TOKEN]
                 }
-                save_json(self.hass.config.path(PERSISTENCE), data)
+                save_json(CREDENTIALS, data)
 
             body = await getFlights(self, data)
 
@@ -311,7 +329,7 @@ class RyanairProfileCoordinator(DataUpdateCoordinator):
     async def _async_update_data(self):
         """Fetch data from API endpoint."""
         try:
-            data = load_json_object(self.hass.config.path(PERSISTENCE))
+            data = load_json_object(CREDENTIALS)
 
             if X_REMEMBER_ME_TOKEN not in data:
                 rememberMeTokenResp = await rememberMeToken(self, data)
@@ -322,7 +340,7 @@ class RyanairProfileCoordinator(DataUpdateCoordinator):
                     TOKEN: data[TOKEN],
                     X_REMEMBER_ME_TOKEN: rememberMeTokenResp[TOKEN]
                 }
-                save_json(self.hass.config.path(PERSISTENCE), data)
+                save_json(CREDENTIALS, data)
 
             body = await getUserProfile(self, data)
 
