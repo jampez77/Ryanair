@@ -9,7 +9,6 @@ import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResult
-from homeassistant.exceptions import HomeAssistantError
 from homeassistant.const import CONF_EMAIL, CONF_PASSWORD
 from homeassistant.helpers.json import save_json
 from .const import (
@@ -27,7 +26,7 @@ from .const import (
 )
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from .coordinator import RyanairCoordinator, RyanairMfaCoordinator
-from .errors import CannotConnect, RyanairError
+from .errors import CannotConnect
 
 _LOGGER = logging.getLogger(__name__)
 CREDENTIALS = LOCAL_FOLDER + PERSISTENCE

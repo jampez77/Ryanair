@@ -10,11 +10,8 @@ from .const import (
     CUSTOMER_ID,
     ACCESS_DENIED,
     CAUSE,
-    NOT_AUTHENTICATED,
-    BOOKING_REFERENCES,
     BOARDING_PASS_HEADERS,
     TYPE,
-    EMAIL,
     LOCAL_FOLDER
 )
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -36,7 +33,7 @@ from .coordinator import RyanairProfileCoordinator, RyanairFlightsCoordinator
 from homeassistant.util.json import JsonObjectType, JsonArrayType
 _LOGGER = logging.getLogger(__name__)
 # Time between updating data from GitHub
-SCAN_INTERVAL = timedelta(minutes=10)
+SCAN_INTERVAL = timedelta(minutes=1)
 BOARDING_PASS_PERSISTENCE = LOCAL_FOLDER + BOARDING_PASS_HEADERS
 
 
@@ -55,162 +52,11 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Setup sensors from a config entry created in the integrations UI."""
+
+    print("sensor async_setup_entry")
     config = hass.data[DOMAIN][entry.entry_id]
     # Update our config to include new repos and remove those that have been removed.
-    if entry.options:
-        config.update(entry.options)
-
-    session = async_get_clientsession(hass)
-
-    profileCoordinator = RyanairProfileCoordinator(hass, session, entry.data)
-
-    await profileCoordinator.async_refresh()
-
-    name = entry.data[CUSTOMER_ID]
-
-    profileDescription = SensorEntityDescription(
-        key=f"Ryanair_{name}",
-        name=f"Ryanair User Profile {name}",
-    )
-
-    flightsCoordinator = RyanairFlightsCoordinator(hass, session, config)
-
-    await flightsCoordinator.async_refresh()
-
-    name = config[CUSTOMER_ID]
-
-    sensors = []
-
-    if (ACCESS_DENIED not in profileCoordinator.data and CAUSE not in profileCoordinator.data and TYPE not in profileCoordinator.data):
-        data = load_json_object(BOARDING_PASS_PERSISTENCE)
-
-        if BOOKING_REFERENCES in data:
-            data = {
-                EMAIL: profileCoordinator.data["email"],
-                BOOKING_REFERENCES: data[BOOKING_REFERENCES]
-            }
-        else:
-            data = {
-                EMAIL: profileCoordinator.data["email"]
-            }
-        save_json(BOARDING_PASS_PERSISTENCE, data)
-
-        sensors.append(RyanairProfileSensor(
-            profileCoordinator, name, profileDescription))
-
-    if "items" in flightsCoordinator.data and len(flightsCoordinator.data["items"]) > 0:
-        boardingPasses = []
-        for item in flightsCoordinator.data["items"]:
-
-            flights = item["rawBooking"]["flights"]
-            bookingRef = item["rawBooking"]["recordLocator"]
-            boardingPasses.append(bookingRef)
-            seats = item["rawBooking"]["seats"]
-            passengers = item["rawBooking"]["passengers"]
-
-            itinerary = {
-                "status": item["rawBooking"]["status"],
-                "bookingRef": bookingRef,
-                "journeys": []
-            }
-            for flight in flights:
-
-                journey = {
-                    "checkInOpen": flight["checkInOpenUTC"],
-                    "checkInClose": flight["checkInCloseUTC"],
-                    "checkInComplete": False,
-                    "flights": []
-                }
-
-                segments = flight["segments"]
-
-                for segment in segments:
-                    segmentInfo = {
-                        "destination": segment["destination"],
-                        "origin": segment["origin"],
-                        "flightNumber": segment["flightNumber"],
-                        "isCancelled": segment["isCancelled"],
-                        "arrive": segment["times"]["arriveUTC"],
-                        "depart": segment["times"]["departUTC"],
-                        "checkInComplete": False,
-                        "passengers": []
-                    }
-                    segmentPassengers = []
-                    checkedInPassengers = []
-                    for seat in seats:
-                        if seat["journeyNum"] == flight["journeyNum"] and seat["segmentNum"] == segment["segmentNum"]:
-                            for passenger in passengers:
-                                if seat["paxNum"] == passenger["paxNum"]:
-                                    passengerInfo = {
-                                        "code": seat["code"],
-                                        "title": passenger["title"],
-                                        "firstName": passenger["firstName"],
-                                        "middleName": passenger["middleName"],
-                                        "lastName": passenger["lastName"],
-                                        "checkedIn": False
-                                    }
-                                    if "checkins" in item["rawBooking"] and len(item["rawBooking"]["checkins"]) > 0:
-                                        for checkin in item["rawBooking"]["checkins"]:
-                                            if checkin["journeyNum"] == flight["journeyNum"] and checkin["paxNum"] == passenger["paxNum"] and checkin["status"] == "checkin":
-                                                checkedInPassengers.append(
-                                                    checkin)
-                                                passengerInfo["checkedIn"] = True
-                                    segmentPassengers.append(passengerInfo)
-
-                                if len(checkedInPassengers) == len(segmentPassengers):
-                                    segmentInfo["checkInComplete"] = True
-
-                            if len(checkedInPassengers) == len(passengers):
-                                journey["checkInComplete"] = True
-
-                    segmentInfo["passengers"] = segmentPassengers
-                    journey["flights"].insert(
-                        segment["segmentNum"], segmentInfo)
-
-                itinerary["journeys"].insert(flight["journeyNum"], journey)
-
-                upcomingFlights = 0
-                for journey in itinerary["journeys"]:
-
-                    checkInInfo = {
-                        "checkInOpen": journey["checkInOpen"],
-                        "checkInClose": journey["checkInClose"],
-                    }
-                    upcomingFlights = upcomingFlights + len(journey["flights"])
-                    for flight in journey["flights"]:
-
-                        flightDescription = SensorEntityDescription(
-                            key=f"Ryanair_flight{name}",
-                            name=name,
-                        )
-
-                        sensors.append(RyanairFlightSensor(
-                            flightsCoordinator, bookingRef, checkInInfo, flight, flightDescription))
-
-            flightCountDescription = SensorEntityDescription(
-                key=f"Ryanair_flight-count{name}",
-                name="Upcoming Flights",
-            )
-
-            name = profileCoordinator.data["firstName"] + \
-                " " + profileCoordinator.data["lastName"]
-            sensors.append(RyanairFlightCountSensor(
-                bookingRef, upcomingFlights, name, flightCountDescription))
-
-        data = load_json_object(BOARDING_PASS_PERSISTENCE)
-
-        if EMAIL in data:
-            data = {
-                EMAIL: data[EMAIL],
-                BOOKING_REFERENCES: boardingPasses
-            }
-        else:
-            data = {
-                BOOKING_REFERENCES: boardingPasses
-            }
-        save_json(BOARDING_PASS_PERSISTENCE, data)
-
-    async_add_entities(sensors, update_before_add=True)
+    await async_setup_platform(hass, config, async_add_entities)
 
 
 async def async_setup_platform(
@@ -220,9 +66,12 @@ async def async_setup_platform(
     _: DiscoveryInfoType | None = None,
 ) -> None:
     """Set up the sensor platform."""
+    print("sensor async_setup_platform")
     session = async_get_clientsession(hass)
 
     profileCoordinator = RyanairProfileCoordinator(hass, session, config)
+
+    await profileCoordinator.async_config_entry_first_refresh()
 
     name = config[CUSTOMER_ID]
 
@@ -232,6 +81,8 @@ async def async_setup_platform(
     )
 
     flightsCoordinator = RyanairFlightsCoordinator(hass, session, config)
+
+    await flightsCoordinator.async_config_entry_first_refresh()
 
     name = config[CUSTOMER_ID]
 
@@ -585,23 +436,3 @@ class RyanairProfileSensor(CoordinatorEntity[RyanairProfileCoordinator], SensorE
             _LOGGER.exception(
                 "Error retrieving data from Ryanair for sensor %s", self.name
             )
-
-
-class RyanairEntity(CoordinatorEntity, SensorEntity):
-    """An entity using CoordinatorEntity."""
-
-    def __init__(self, coordinator, idx) -> None:
-        """Pass coordinator to CoordinatorEntity."""
-        super().__init__(coordinator, context=idx)
-        self.idx = idx
-
-    @property
-    def extra_state_attributes(self) -> dict[str, Any]:
-        """Return the state attributes."""
-        return self.entity_description.attr_fn(self)
-
-    @callback
-    def _handle_coordinator_update(self) -> None:
-        """Handle data update."""
-
-        self.async_write_ha_state()

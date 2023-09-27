@@ -38,11 +38,12 @@ from .const import (
     CLIENT_ERROR,
     TYPE,
     BOARDING_PASS_URL,
-    EMAIL,
-    RECORD_LOCATOR,
     LOCAL_FOLDER,
     BOARDING_PASSES_URI,
-    BOARDING_PASS_HEADERS
+    BOOKING_REFERENCES,
+    BOARDING_PASS_HEADERS,
+    EMAIL,
+    RECORD_LOCATOR,
 )
 from .errors import RyanairError, InvalidAuth, APIRatelimitExceeded, UnknownError
 from homeassistant.exceptions import ConfigEntryAuthFailed
@@ -53,7 +54,7 @@ _LOGGER = logging.getLogger(__name__)
 
 USER_PROFILE_URL = HOST + USER_PROFILE + V
 ORDERS_URL = HOST + ORDERS + V
-
+BOARDING_PASS_PERSISTENCE = LOCAL_FOLDER + BOARDING_PASS_HEADERS
 CREDENTIALS = LOCAL_FOLDER + PERSISTENCE
 
 
@@ -118,7 +119,6 @@ async def getFlights(self, data):
         },
     )
     body = await resp.json()
-
     return body
 
 
@@ -134,7 +134,6 @@ async def getUserProfile(self, data):
         },
     )
     body = await resp.json()
-
     return body
 
 
@@ -153,7 +152,6 @@ async def getBoardingPasses(self, data, headers):
         }
     )
     body = await resp.json()
-    print("getBoardingPasses")
     return body
 
 
@@ -169,67 +167,65 @@ class RyanairBoardingPassCoordinator(DataUpdateCoordinator):
             # Name of the data. For logging purposes.
             name="Ryanair",
             # Polling interval. Will only be polled if there are subscribers.
-            update_interval=timedelta(seconds=30),
+            update_interval=timedelta(minutes=1),
         )
-        self.email = data[EMAIL]
-        self.record_locator = data[RECORD_LOCATOR]
         self.session = session
 
     async def _async_update_data(self):
         """Fetch data from API endpoint."""
         try:
-            data = load_json_object(CREDENTIALS)
+            print("update boarding pass data")
+            boardingPassData = load_json_object(BOARDING_PASS_PERSISTENCE)
 
-            if X_REMEMBER_ME_TOKEN not in data:
-                rememberMeTokenResp = await rememberMeToken(self, data)
+            if BOOKING_REFERENCES in boardingPassData and EMAIL in boardingPassData:
+                for bookingRef in boardingPassData[BOOKING_REFERENCES]:
+                    headers = {
+                        EMAIL: boardingPassData[EMAIL],
+                        RECORD_LOCATOR: bookingRef
+                    }
 
-                data = {
-                    CONF_DEVICE_FINGERPRINT: data[CONF_DEVICE_FINGERPRINT],
-                    CUSTOMER_ID: data[CUSTOMER_ID],
-                    TOKEN: data[TOKEN],
-                    X_REMEMBER_ME_TOKEN: rememberMeTokenResp[TOKEN]
-                }
-                save_json(CREDENTIALS, data)
+                    data = load_json_object(CREDENTIALS)
 
-            headers = {
-                EMAIL: self.email,
-                RECORD_LOCATOR: self.record_locator
-            }
+                    if X_REMEMBER_ME_TOKEN not in data:
+                        rememberMeTokenResp = await rememberMeToken(self, data)
 
-            body = await getBoardingPasses(self, data, headers)
+                        data = {
+                            CONF_DEVICE_FINGERPRINT: data[CONF_DEVICE_FINGERPRINT],
+                            CUSTOMER_ID: data[CUSTOMER_ID],
+                            TOKEN: data[TOKEN],
+                            X_REMEMBER_ME_TOKEN: rememberMeTokenResp[TOKEN]
+                        }
+                        save_json(CREDENTIALS, data)
 
-            if (ACCESS_DENIED in body and body[CAUSE] == NOT_AUTHENTICATED) or (
-                TYPE in body and body[TYPE] == CLIENT_ERROR
-            ):
-                refreshedData = await refreshToken(self, data)
+                    body = await getBoardingPasses(self, data, headers)
 
-                headers = {
-                    EMAIL: self.email,
-                    RECORD_LOCATOR: self.record_locator
-                }
+                    if (ACCESS_DENIED in body and body[CAUSE] == NOT_AUTHENTICATED) or (
+                        TYPE in body and body[TYPE] == CLIENT_ERROR
+                    ):
+                        refreshedData = await refreshToken(self, data)
 
-                body = await getBoardingPasses(self, refreshedData, headers)
+                        body = await getBoardingPasses(self, refreshedData, headers)
 
-            for boardingPass in body:
-                aztec_code = AztecCode(boardingPass['barcode'])
+                    for boardingPass in body:
+                        aztec_code = AztecCode(boardingPass['barcode'])
 
-                flightName = "(" + boardingPass["flight"]["label"] + ") " + \
-                    boardingPass["departure"]["name"] + \
-                    " - " + boardingPass["arrival"]["name"]
+                        flightName = "(" + boardingPass["flight"]["label"] + ") " + \
+                            boardingPass["departure"]["name"] + \
+                            " - " + boardingPass["arrival"]["name"]
 
-                seat = boardingPass["seat"]["designator"]
+                        seat = boardingPass["seat"]["designator"]
 
-                passenger = boardingPass["name"]["first"] + \
-                    " " + boardingPass["name"]["last"]
+                        passenger = boardingPass["name"]["first"] + \
+                            " " + boardingPass["name"]["last"]
 
-                name = passenger + ": " + \
-                    flightName + "(" + seat + ")"
+                        name = passenger + ": " + \
+                            flightName + "(" + seat + ")"
 
-                fileName = re.sub(
-                    "[\W_]", "", name + boardingPass["departure"]["dateUTC"]) + ".png"
-                print("Saving Aztec")
-                aztec_code.save(
-                    LOCAL_FOLDER + BOARDING_PASSES_URI + fileName, module_size=16)
+                        fileName = re.sub(
+                            "[\W_]", "", name + boardingPass["departure"]["dateUTC"]) + ".png"
+                        print("Saving Aztec")
+                        aztec_code.save(
+                            LOCAL_FOLDER + BOARDING_PASSES_URI + fileName, module_size=16)
 
         except InvalidAuth as err:
             raise ConfigEntryAuthFailed from err
@@ -261,16 +257,17 @@ class RyanairFlightsCoordinator(DataUpdateCoordinator):
             # Name of the data. For logging purposes.
             name="Ryanair",
             # Polling interval. Will only be polled if there are subscribers.
-            update_interval=timedelta(seconds=300),
+            update_interval=timedelta(minutes=1),
         )
-
+        self.hass = hass
         self.session = session
+        self.config = data
 
     async def _async_update_data(self):
         """Fetch data from API endpoint."""
         try:
             data = load_json_object(CREDENTIALS)
-
+            print("update flights data")
             if X_REMEMBER_ME_TOKEN not in data:
                 rememberMeTokenResp = await rememberMeToken(self, data)
 
@@ -290,6 +287,9 @@ class RyanairFlightsCoordinator(DataUpdateCoordinator):
                 refreshedData = await refreshToken(self, data)
 
                 body = await getFlights(self, refreshedData)
+
+            RyanairBoardingPassCoordinator(
+                self.hass, self.session, self.config)
 
         except InvalidAuth as err:
             raise ConfigEntryAuthFailed from err
@@ -321,7 +321,7 @@ class RyanairProfileCoordinator(DataUpdateCoordinator):
             # Name of the data. For logging purposes.
             name="Ryanair",
             # Polling interval. Will only be polled if there are subscribers.
-            update_interval=timedelta(seconds=300),
+            update_interval=timedelta(minutes=1),
         )
 
         self.session = session
@@ -330,7 +330,7 @@ class RyanairProfileCoordinator(DataUpdateCoordinator):
         """Fetch data from API endpoint."""
         try:
             data = load_json_object(CREDENTIALS)
-
+            print("update profile data")
             if X_REMEMBER_ME_TOKEN not in data:
                 rememberMeTokenResp = await rememberMeToken(self, data)
 
@@ -381,7 +381,7 @@ class RyanairMfaCoordinator(DataUpdateCoordinator):
             # Name of the data. For logging purposes.
             name="Ryanair",
             # Polling interval. Will only be polled if there are subscribers.
-            update_interval=timedelta(seconds=300),
+            update_interval=timedelta(minutes=1),
         )
 
         self.session = session
@@ -435,7 +435,7 @@ class RyanairCoordinator(DataUpdateCoordinator):
             # Name of the data. For logging purposes.
             name="Ryanair",
             # Polling interval. Will only be polled if there are subscribers.
-            update_interval=timedelta(seconds=300),
+            update_interval=timedelta(minutes=1),
         )
 
         self.session = session
