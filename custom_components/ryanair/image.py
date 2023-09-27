@@ -27,7 +27,7 @@ from homeassistant.helpers.update_coordinator import (
     CoordinatorEntity,
 )
 BOARDING_PASS_PERSISTENCE = LOCAL_FOLDER + BOARDING_PASS_HEADERS
-SCAN_INTERVAL = timedelta(minutes=1)
+SCAN_INTERVAL = timedelta(5)
 
 
 def deviceInfo(bookingRef) -> DeviceInfo:
@@ -46,7 +46,6 @@ async def async_setup_platform(
     _: DiscoveryInfoType | None = None,
 ) -> None:
     """Set up the sensor platform."""
-    print("image async_setup_platform")
     session = async_get_clientsession(hass)
 
     sensors = []
@@ -87,7 +86,6 @@ async def async_setup_entry(
 ) -> None:
     """Setup sensors from a config entry created in the integrations UI."""
 
-    print("image async_setup_entry")
     config = hass.data[DOMAIN][entry.entry_id]
     # Update our config to include new repos and remove those that have been removed.
     await async_setup_platform(hass, config, async_add_entities)
@@ -126,7 +124,6 @@ class RyanairBoardingPassImage(CoordinatorEntity[RyanairBoardingPassCoordinator]
         self.access_tokens: dict[str, Any] = [""]
         self._current_qr_bytes: bytes | None = None
 
-        print(self.name)
         if self.boardingPassData["paxType"] != "INF":
             fileName = BOARDING_PASSES_URI + re.sub(
                 "[\W_]", "", self.name + self.boardingPassData["departure"]["dateUTC"]) + ".png"
@@ -145,7 +142,18 @@ class RyanairBoardingPassImage(CoordinatorEntity[RyanairBoardingPassCoordinator]
 
     async def async_image(self) -> bytes | None:
         """Return bytes of image."""
+
         image_path = Path(__file__).parent / self.file_name
+
+        qr_bytes = await self._fetch_image()
+
+        if self._current_qr_bytes != qr_bytes:
+            self._attr_image_last_updated = dt_util.utcnow()
+            dt_now = dt_util.utcnow()
+            self._attr_image_last_updated = dt_now
+            self._current_qr_bytes = qr_bytes
+            self.async_write_ha_state()
+
         return await self.hass.async_add_executor_job(image_path.read_bytes)
 
     @property
@@ -160,14 +168,5 @@ class RyanairBoardingPassImage(CoordinatorEntity[RyanairBoardingPassCoordinator]
 
     async def async_update(self) -> None:
         """Update the image entity data."""
-        qr_bytes = await self._fetch_image()
 
         self._attr_image_last_updated = dt_util.utcnow()
-
-        print("update image")
-        if self._current_qr_bytes is not None and qr_bytes is not None:
-            dt_now = dt_util.utcnow()
-            print("Aztec code has changed, reset image last updated property")
-            self._attr_image_last_updated = dt_now
-            self._current_qr_bytes = qr_bytes
-            self.async_write_ha_state()

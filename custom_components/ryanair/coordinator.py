@@ -167,14 +167,13 @@ class RyanairBoardingPassCoordinator(DataUpdateCoordinator):
             # Name of the data. For logging purposes.
             name="Ryanair",
             # Polling interval. Will only be polled if there are subscribers.
-            update_interval=timedelta(minutes=1),
+            update_interval=timedelta(5),
         )
         self.session = session
 
     async def _async_update_data(self):
         """Fetch data from API endpoint."""
         try:
-            print("update boarding pass data")
             boardingPassData = load_json_object(BOARDING_PASS_PERSISTENCE)
 
             if BOOKING_REFERENCES in boardingPassData and EMAIL in boardingPassData:
@@ -223,7 +222,6 @@ class RyanairBoardingPassCoordinator(DataUpdateCoordinator):
 
                         fileName = re.sub(
                             "[\W_]", "", name + boardingPass["departure"]["dateUTC"]) + ".png"
-                        print("Saving Aztec")
                         aztec_code.save(
                             LOCAL_FOLDER + BOARDING_PASSES_URI + fileName, module_size=16)
 
@@ -257,7 +255,7 @@ class RyanairFlightsCoordinator(DataUpdateCoordinator):
             # Name of the data. For logging purposes.
             name="Ryanair",
             # Polling interval. Will only be polled if there are subscribers.
-            update_interval=timedelta(minutes=1),
+            update_interval=timedelta(minutes=5),
         )
         self.hass = hass
         self.session = session
@@ -267,7 +265,6 @@ class RyanairFlightsCoordinator(DataUpdateCoordinator):
         """Fetch data from API endpoint."""
         try:
             data = load_json_object(CREDENTIALS)
-            print("update flights data")
             if X_REMEMBER_ME_TOKEN not in data:
                 rememberMeTokenResp = await rememberMeToken(self, data)
 
@@ -321,7 +318,7 @@ class RyanairProfileCoordinator(DataUpdateCoordinator):
             # Name of the data. For logging purposes.
             name="Ryanair",
             # Polling interval. Will only be polled if there are subscribers.
-            update_interval=timedelta(minutes=1),
+            update_interval=timedelta(minutes=5),
         )
 
         self.session = session
@@ -330,7 +327,6 @@ class RyanairProfileCoordinator(DataUpdateCoordinator):
         """Fetch data from API endpoint."""
         try:
             data = load_json_object(CREDENTIALS)
-            print("update profile data")
             if X_REMEMBER_ME_TOKEN not in data:
                 rememberMeTokenResp = await rememberMeToken(self, data)
 
@@ -381,7 +377,7 @@ class RyanairMfaCoordinator(DataUpdateCoordinator):
             # Name of the data. For logging purposes.
             name="Ryanair",
             # Polling interval. Will only be polled if there are subscribers.
-            update_interval=timedelta(minutes=1),
+            update_interval=timedelta(5),
         )
 
         self.session = session
@@ -435,7 +431,7 @@ class RyanairCoordinator(DataUpdateCoordinator):
             # Name of the data. For logging purposes.
             name="Ryanair",
             # Polling interval. Will only be polled if there are subscribers.
-            update_interval=timedelta(minutes=1),
+            update_interval=timedelta(5),
         )
 
         self.session = session

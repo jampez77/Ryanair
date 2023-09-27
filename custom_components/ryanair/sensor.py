@@ -33,7 +33,7 @@ from .coordinator import RyanairProfileCoordinator, RyanairFlightsCoordinator
 from homeassistant.util.json import JsonObjectType, JsonArrayType
 _LOGGER = logging.getLogger(__name__)
 # Time between updating data from GitHub
-SCAN_INTERVAL = timedelta(minutes=1)
+SCAN_INTERVAL = timedelta(minutes=5)
 BOARDING_PASS_PERSISTENCE = LOCAL_FOLDER + BOARDING_PASS_HEADERS
 
 
@@ -53,7 +53,6 @@ async def async_setup_entry(
 ) -> None:
     """Setup sensors from a config entry created in the integrations UI."""
 
-    print("sensor async_setup_entry")
     config = hass.data[DOMAIN][entry.entry_id]
     # Update our config to include new repos and remove those that have been removed.
     await async_setup_platform(hass, config, async_add_entities)
@@ -66,7 +65,6 @@ async def async_setup_platform(
     _: DiscoveryInfoType | None = None,
 ) -> None:
     """Set up the sensor platform."""
-    print("sensor async_setup_platform")
     session = async_get_clientsession(hass)
 
     profileCoordinator = RyanairProfileCoordinator(hass, session, config)
