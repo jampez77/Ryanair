@@ -83,13 +83,13 @@ async def async_setup_platform(
 
         now_utc = dt_util.utcnow().timestamp()
 
-        departUTC = datetime.strptime(
-            boardingPass["departure"]["dateUTC"], "%Y-%m-%dT%H:%M:%SZ").timestamp()
-
         fileName = BOARDING_PASSES_URI + \
             getFileName(name + boardingPass["departure"]["dateUTC"])
 
-        if now_utc > (departUTC + dt.timedelta(days=1)):
+        nextDay = (datetime.strptime(
+            boardingPass["departure"]["dateUTC"], "%Y-%m-%dT%H:%M:%SZ") + dt.timedelta(days=1)).timestamp()
+
+        if now_utc > nextDay:
             if fileName and os.path.isfile(fileName):
                 os.remove(fileName)
         else:
