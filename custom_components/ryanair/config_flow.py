@@ -1,10 +1,10 @@
 """Config flow for Ryanair integration."""
 from __future__ import annotations
 
-import logging
 from typing import Any
 import uuid
 import hashlib
+from pathlib import Path
 import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.core import HomeAssistant
@@ -21,15 +21,13 @@ from .const import (
     MFA_TOKEN,
     MFA_CODE,
     CODE_MFA_CODE_WRONG,
-    PERSISTENCE,
-    LOCAL_FOLDER
+    PERSISTENCE
 )
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from .coordinator import RyanairCoordinator, RyanairMfaCoordinator
 from .errors import CannotConnect
 
-_LOGGER = logging.getLogger(__name__)
-CREDENTIALS = LOCAL_FOLDER + PERSISTENCE
+CREDENTIALS = Path(__file__).parent / PERSISTENCE
 
 STEP_USER_DATA_SCHEMA = vol.Schema(
     {

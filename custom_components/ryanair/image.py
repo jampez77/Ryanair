@@ -17,7 +17,6 @@ from datetime import datetime
 from .const import (
     DOMAIN,
     BOARDING_PASS_HEADERS,
-    LOCAL_FOLDER,
     BOARDING_PASSES_URI
 )
 from typing import Any
@@ -29,7 +28,7 @@ from homeassistant.components.image import (
 from homeassistant.helpers.update_coordinator import (
     CoordinatorEntity,
 )
-BOARDING_PASS_PERSISTENCE = LOCAL_FOLDER + BOARDING_PASS_HEADERS
+BOARDING_PASS_PERSISTENCE = Path(__file__).parent / BOARDING_PASS_HEADERS
 SCAN_INTERVAL = timedelta(5)
 
 
@@ -63,38 +62,39 @@ async def async_setup_platform(
 
     await boardPassCoordinator.async_config_entry_first_refresh()
 
-    for boardingPass in boardPassCoordinator.data:
-        flightName = "(" + boardingPass["flight"]["label"] + ") " + \
-            boardingPass["departure"]["name"] + \
-            " - " + boardingPass["arrival"]["name"]
+    if boardPassCoordinator.data is not None:
+        for boardingPass in boardPassCoordinator.data:
+            flightName = "(" + boardingPass["flight"]["label"] + ") " + \
+                boardingPass["departure"]["name"] + \
+                " - " + boardingPass["arrival"]["name"]
 
-        seat = boardingPass["seat"]["designator"]
+            seat = boardingPass["seat"]["designator"]
 
-        passenger = boardingPass["name"]["first"] + \
-            " " + boardingPass["name"]["last"]
+            passenger = boardingPass["name"]["first"] + \
+                " " + boardingPass["name"]["last"]
 
-        name = passenger + ": " + \
-            flightName + "(" + seat + ")"
+            name = passenger + ": " + \
+                flightName + "(" + seat + ")"
 
-        boardingPassDescription = ImageEntityDescription(
-            key=f"Ryanair_boarding_pass{name}",
-            name=name,
-        )
+            boardingPassDescription = ImageEntityDescription(
+                key=f"Ryanair_boarding_pass{name}",
+                name=name,
+            )
 
-        now_utc = dt_util.utcnow().timestamp()
+            now_utc = dt_util.utcnow().timestamp()
 
-        fileName = BOARDING_PASSES_URI + \
-            getFileName(name + boardingPass["departure"]["dateUTC"])
+            fileName = Path(__file__).parent / (BOARDING_PASSES_URI + "/" +
+                                                getFileName(name + boardingPass["departure"]["dateUTC"]))
 
-        nextDay = (datetime.strptime(
-            boardingPass["departure"]["dateUTC"], "%Y-%m-%dT%H:%M:%SZ") + dt.timedelta(days=1)).timestamp()
+            nextDay = (datetime.strptime(
+                boardingPass["departure"]["dateUTC"], "%Y-%m-%dT%H:%M:%SZ") + dt.timedelta(days=1)).timestamp()
 
-        if now_utc > nextDay:
-            if fileName and os.path.isfile(fileName):
-                os.remove(fileName)
-        else:
-            sensors.append(RyanairBoardingPassImage(hass, boardPassCoordinator,
-                                                    boardingPass, boardingPass["pnr"], name, boardingPassDescription))
+            if now_utc > nextDay:
+                if fileName and os.path.isfile(fileName):
+                    os.remove(fileName)
+            else:
+                sensors.append(RyanairBoardingPassImage(hass, boardPassCoordinator,
+                                                        boardingPass, boardingPass["pnr"], name, boardingPassDescription))
 
     async_add_entities(sensors, update_before_add=True)
 
@@ -145,9 +145,8 @@ class RyanairBoardingPassImage(CoordinatorEntity[RyanairBoardingPassCoordinator]
         self._current_qr_bytes: bytes | None = None
 
         if self.boardingPassData["paxType"] != "INF":
-            fileName = BOARDING_PASSES_URI + \
-                getFileName(
-                    self.name + self.boardingPassData["departure"]["dateUTC"])
+            fileName = BOARDING_PASSES_URI + "/" + getFileName(
+                self.name + self.boardingPassData["departure"]["dateUTC"])
         else:
             fileName = "infant_qr.png"
 

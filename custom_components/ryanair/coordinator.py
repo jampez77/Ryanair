@@ -38,7 +38,6 @@ from .const import (
     CLIENT_ERROR,
     TYPE,
     BOARDING_PASS_URL,
-    LOCAL_FOLDER,
     BOARDING_PASSES_URI,
     BOOKING_REFERENCES,
     BOARDING_PASS_HEADERS,
@@ -49,13 +48,13 @@ from .errors import RyanairError, InvalidAuth, APIRatelimitExceeded, UnknownErro
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.util.json import load_json_object
 from homeassistant.helpers.json import save_json
-
+from pathlib import Path
 _LOGGER = logging.getLogger(__name__)
 
 USER_PROFILE_URL = HOST + USER_PROFILE + V
 ORDERS_URL = HOST + ORDERS + V
-BOARDING_PASS_PERSISTENCE = LOCAL_FOLDER + BOARDING_PASS_HEADERS
-CREDENTIALS = LOCAL_FOLDER + PERSISTENCE
+BOARDING_PASS_PERSISTENCE = Path(__file__).parent / BOARDING_PASS_HEADERS
+CREDENTIALS = Path(__file__).parent / PERSISTENCE
 
 
 async def rememberMeToken(self, data):
@@ -222,8 +221,11 @@ class RyanairBoardingPassCoordinator(DataUpdateCoordinator):
 
                         fileName = re.sub(
                             "[\W_]", "", name + boardingPass["departure"]["dateUTC"]) + ".png"
+
                         aztec_code.save(
-                            LOCAL_FOLDER + BOARDING_PASSES_URI + fileName, module_size=16)
+                            Path(__file__).parent / BOARDING_PASSES_URI / fileName, module_size=16)
+            else:
+                body = None
 
         except InvalidAuth as err:
             raise ConfigEntryAuthFailed from err

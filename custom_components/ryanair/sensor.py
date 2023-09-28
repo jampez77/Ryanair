@@ -11,8 +11,9 @@ from .const import (
     ACCESS_DENIED,
     CAUSE,
     BOARDING_PASS_HEADERS,
+    BOOKING_REFERENCES,
+    EMAIL,
     TYPE,
-    LOCAL_FOLDER
 )
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.entity import DeviceInfo
@@ -20,6 +21,7 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.util.json import load_json_object
 from homeassistant.helpers.json import save_json
 from homeassistant.config_entries import ConfigEntry
+
 from homeassistant.components.sensor import (
     SensorEntity,
     SensorEntityDescription,
@@ -27,14 +29,15 @@ from homeassistant.components.sensor import (
 from homeassistant.helpers.update_coordinator import (
     CoordinatorEntity,
 )
+from pathlib import Path
 from homeassistant.util import dt as dt_util
 from datetime import datetime
 from .coordinator import RyanairProfileCoordinator, RyanairFlightsCoordinator
-from homeassistant.util.json import JsonObjectType, JsonArrayType
+from homeassistant.util.json import JsonObjectType
 _LOGGER = logging.getLogger(__name__)
 # Time between updating data from GitHub
 SCAN_INTERVAL = timedelta(minutes=5)
-BOARDING_PASS_PERSISTENCE = LOCAL_FOLDER + BOARDING_PASS_HEADERS
+BOARDING_PASS_PERSISTENCE = Path(__file__).parent / BOARDING_PASS_HEADERS
 
 
 def deviceInfo(name) -> DeviceInfo:
@@ -88,14 +91,28 @@ async def async_setup_platform(
     sensors = []
 
     if (ACCESS_DENIED not in profileCoordinator.data and CAUSE not in profileCoordinator.data and TYPE not in profileCoordinator.data):
+        data = load_json_object(BOARDING_PASS_PERSISTENCE)
+
+        if BOOKING_REFERENCES in data:
+            data = {
+                EMAIL: profileCoordinator.data["email"],
+                BOOKING_REFERENCES: data[BOOKING_REFERENCES]
+            }
+        else:
+            data = {
+                EMAIL: profileCoordinator.data["email"]
+            }
+        save_json(BOARDING_PASS_PERSISTENCE, data)
         sensors.append(RyanairProfileSensor(
             profileCoordinator, name, profileDescription))
 
     if "items" in flightsCoordinator.data and len(flightsCoordinator.data["items"]) > 0:
+        boardingPasses = []
         for item in flightsCoordinator.data["items"]:
 
             flights = item["rawBooking"]["flights"]
             bookingRef = item["rawBooking"]["recordLocator"]
+            boardingPasses.append(bookingRef)
             seats = item["rawBooking"]["seats"]
             passengers = item["rawBooking"]["passengers"]
 
@@ -195,6 +212,19 @@ async def async_setup_platform(
                 " " + profileCoordinator.data["lastName"]
             sensors.append(RyanairFlightCountSensor(
                 bookingRef, upcomingFlights, name, flightCountDescription))
+
+        data = load_json_object(BOARDING_PASS_PERSISTENCE)
+
+        if EMAIL in data:
+            data = {
+                EMAIL: data[EMAIL],
+                BOOKING_REFERENCES: boardingPasses
+            }
+        else:
+            data = {
+                BOOKING_REFERENCES: boardingPasses
+            }
+        save_json(BOARDING_PASS_PERSISTENCE, data)
 
     async_add_entities(sensors, update_before_add=True)
 
