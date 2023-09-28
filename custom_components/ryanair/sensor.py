@@ -40,7 +40,8 @@ BOARDING_PASS_PERSISTENCE = LOCAL_FOLDER + BOARDING_PASS_HEADERS
 def deviceInfo(name) -> DeviceInfo:
     return DeviceInfo(
         identifiers={(DOMAIN, f"Ryanair_{name}")},
-        manufacturer="Ryanair",
+        manufacturer="Jamie Nandhra-Pezone",
+        model="Ryanair",
         name=name,
         configuration_url="https://github.com/jampez77/Ryanair/",
     )
@@ -132,7 +133,7 @@ async def async_setup_platform(
                             for passenger in passengers:
                                 if seat["paxNum"] == passenger["paxNum"]:
                                     passengerInfo = {
-                                        "code": seat["code"],
+                                        "seat": seat["code"],
                                         "title": passenger["title"],
                                         "firstName": passenger["firstName"],
                                         "middleName": passenger["middleName"],
@@ -166,8 +167,16 @@ async def async_setup_platform(
                         "checkInOpen": journey["checkInOpen"],
                         "checkInClose": journey["checkInClose"],
                     }
-                    upcomingFlights = upcomingFlights + len(journey["flights"])
+
                     for flight in journey["flights"]:
+
+                        now_utc = dt_util.utcnow().timestamp()
+
+                        departUTC = datetime.strptime(
+                            flight["depart"], "%Y-%m-%dT%H:%M:%SZ").timestamp()
+
+                        if now_utc < departUTC:
+                            upcomingFlights = upcomingFlights + 1
 
                         flightDescription = SensorEntityDescription(
                             key=f"Ryanair_flight{name}",
@@ -240,6 +249,7 @@ class RyanairFlightCountSensor(SensorEntity):
 
         Only used by the generic entity update service.
         """
+
         try:
             self._available = True
         except ClientError:

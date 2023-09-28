@@ -11,6 +11,8 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.util.json import JsonObjectType
 from pathlib import Path
 from datetime import timedelta
+import os
+from datetime import datetime
 from .const import (
     DOMAIN,
     BOARDING_PASS_HEADERS,
@@ -33,10 +35,15 @@ SCAN_INTERVAL = timedelta(5)
 def deviceInfo(bookingRef) -> DeviceInfo:
     return DeviceInfo(
         identifiers={(DOMAIN, f"Ryanair_{bookingRef}")},
-        manufacturer="Ryanair",
+        manufacturer="Jamie Nandhra-Pezone",
+        model="Ryanair",
         name=bookingRef,
         configuration_url="https://github.com/jampez77/Ryanair/",
     )
+
+
+def getFileName(name) -> str:
+    return re.sub("[\W_]", "", name) + ".png"
 
 
 async def async_setup_platform(
@@ -73,8 +80,20 @@ async def async_setup_platform(
             name=name,
         )
 
-        sensors.append(RyanairBoardingPassImage(hass, boardPassCoordinator,
-                       boardingPass, boardingPass["pnr"], name, boardingPassDescription))
+        now_utc = dt_util.utcnow().timestamp()
+
+        departUTC = datetime.strptime(
+            boardingPass["departure"]["dateUTC"], "%Y-%m-%dT%H:%M:%SZ").timestamp()
+
+        fileName = BOARDING_PASSES_URI + \
+            getFileName(name + boardingPass["departure"]["dateUTC"])
+
+        if now_utc > (departUTC + datetime.timedelta(days=1)):
+            if fileName and os.path.isfile(fileName):
+                os.remove(fileName)
+        else:
+            sensors.append(RyanairBoardingPassImage(hass, boardPassCoordinator,
+                                                    boardingPass, boardingPass["pnr"], name, boardingPassDescription))
 
     async_add_entities(sensors, update_before_add=True)
 
@@ -125,8 +144,9 @@ class RyanairBoardingPassImage(CoordinatorEntity[RyanairBoardingPassCoordinator]
         self._current_qr_bytes: bytes | None = None
 
         if self.boardingPassData["paxType"] != "INF":
-            fileName = BOARDING_PASSES_URI + re.sub(
-                "[\W_]", "", self.name + self.boardingPassData["departure"]["dateUTC"]) + ".png"
+            fileName = BOARDING_PASSES_URI + \
+                getFileName(
+                    self.name + self.boardingPassData["departure"]["dateUTC"])
         else:
             fileName = "infant_qr.png"
 
