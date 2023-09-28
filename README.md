@@ -1,6 +1,6 @@
 # ![Logo](https://github.com/jampez77/Ryanair/blob/main/logo.png "Ryanair Logo") Ryanair API for Home Assistant
 
-This component will allow you to bring your upcoming Ryanair flight information into [Home Assistant](https://www.home-assistant.io/). Each flight will provide the following information:
+This component will allow you to bring your upcoming Ryanair flight information into [Home Assistant](https://www.home-assistant.io/). The following informatin will be provided:
 
 * Flight Number.
 * Origin / Destination Airport code.
@@ -8,8 +8,10 @@ This component will allow you to bring your upcoming Ryanair flight information 
 * Arrival / departure time.
 * Passengers name and seat number.
 * Mobile frienldy boarding passes.
-* number of upcoming flights.
-* flight cancellation status.
+* Number of upcoming flights.
+* Flight cancellation status.
+* Ryanair user account information.
+* Upcoming flights count.
 
 This project is very much a work in progress and there are still many issue that need addressing. If you have the skills, time and implication then please feel free to contribute.
 
