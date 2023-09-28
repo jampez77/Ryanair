@@ -3,6 +3,7 @@ from __future__ import annotations
 from homeassistant.helpers.entity import DeviceInfo
 from .coordinator import RyanairBoardingPassCoordinator
 from homeassistant.util import dt as dt_util
+import datetime as dt
 from homeassistant.helpers.typing import ConfigType, DiscoveryInfoType
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.core import HomeAssistant
@@ -88,7 +89,7 @@ async def async_setup_platform(
         fileName = BOARDING_PASSES_URI + \
             getFileName(name + boardingPass["departure"]["dateUTC"])
 
-        if now_utc > (departUTC + datetime.timedelta(days=1)):
+        if now_utc > (departUTC + dt.timedelta(days=1)):
             if fileName and os.path.isfile(fileName):
                 os.remove(fileName)
         else:
