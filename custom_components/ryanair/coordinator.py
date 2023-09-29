@@ -102,7 +102,7 @@ async def refreshToken(self, data):
     }
 
     rememberMeTokenResp = await rememberMeToken(self, ryanairData)
-
+    users = {}
     ryanairData = {
         CONF_DEVICE_FINGERPRINT: data[CONF_DEVICE_FINGERPRINT],
         CUSTOMER_ID: data[CUSTOMER_ID],
@@ -110,7 +110,9 @@ async def refreshToken(self, data):
         X_REMEMBER_ME_TOKEN: rememberMeTokenResp[TOKEN],
     }
 
-    save_json(CREDENTIALS, ryanairData)
+    users[data[CONF_DEVICE_FINGERPRINT]] = ryanairData
+
+    save_json(CREDENTIALS, users)
     return ryanairData
 
 
@@ -207,13 +209,17 @@ class RyanairBookingDetailsCoordinator(DataUpdateCoordinator):
             if X_REMEMBER_ME_TOKEN not in data:
                 rememberMeTokenResp = await rememberMeToken(self, data)
 
+                users = {}
                 data = {
                     CONF_DEVICE_FINGERPRINT: data[CONF_DEVICE_FINGERPRINT],
                     CUSTOMER_ID: data[CUSTOMER_ID],
                     TOKEN: data[TOKEN],
                     X_REMEMBER_ME_TOKEN: rememberMeTokenResp[TOKEN],
                 }
-                save_json(CREDENTIALS, data)
+
+                users[data[CONF_DEVICE_FINGERPRINT]] = data
+
+                save_json(CREDENTIALS, users)
 
             body = await getBookingDetails(self, data, self.bookingInfo)
 
@@ -281,13 +287,16 @@ class RyanairBoardingPassCoordinator(DataUpdateCoordinator):
                     if X_REMEMBER_ME_TOKEN not in data:
                         rememberMeTokenResp = await rememberMeToken(self, data)
 
+                        users = {}
                         data = {
                             CONF_DEVICE_FINGERPRINT: data[CONF_DEVICE_FINGERPRINT],
                             CUSTOMER_ID: data[CUSTOMER_ID],
                             TOKEN: data[TOKEN],
-                            X_REMEMBER_ME_TOKEN: rememberMeTokenResp[TOKEN]
+                            X_REMEMBER_ME_TOKEN: rememberMeTokenResp[TOKEN],
                         }
-                        save_json(CREDENTIALS, data)
+
+                        users[data[CONF_DEVICE_FINGERPRINT]] = data
+                        save_json(CREDENTIALS, users)
 
                     body = await getBoardingPasses(self, data, headers)
 
@@ -343,7 +352,7 @@ class RyanairBoardingPassCoordinator(DataUpdateCoordinator):
 class RyanairFlightsCoordinator(DataUpdateCoordinator):
     """Flights Coordinator"""
 
-    def __init__(self, hass: HomeAssistant, session, data) -> None:
+    def __init__(self, hass: HomeAssistant, session, fingerprint) -> None:
         """Initialize coordinator."""
 
         super().__init__(
@@ -356,29 +365,32 @@ class RyanairFlightsCoordinator(DataUpdateCoordinator):
         )
         self.hass = hass
         self.session = session
-        self.config = data
+        self.fingerprint = fingerprint
 
     async def _async_update_data(self):
         """Fetch data from API endpoint."""
         try:
             data = load_json_object(CREDENTIALS)
+            userData = data[self.fingerprint]
             if X_REMEMBER_ME_TOKEN not in data:
-                rememberMeTokenResp = await rememberMeToken(self, data)
-
+                rememberMeTokenResp = await rememberMeToken(self, userData)
+                users = {}
                 data = {
-                    CONF_DEVICE_FINGERPRINT: data[CONF_DEVICE_FINGERPRINT],
-                    CUSTOMER_ID: data[CUSTOMER_ID],
-                    TOKEN: data[TOKEN],
-                    X_REMEMBER_ME_TOKEN: rememberMeTokenResp[TOKEN],
+                    CONF_DEVICE_FINGERPRINT: userData[CONF_DEVICE_FINGERPRINT],
+                    CUSTOMER_ID: userData[CUSTOMER_ID],
+                    TOKEN: userData[TOKEN],
+                    X_REMEMBER_ME_TOKEN: rememberMeTokenResp[TOKEN]
                 }
-                save_json(CREDENTIALS, data)
+
+                users[data[CONF_DEVICE_FINGERPRINT]] = data
+                save_json(CREDENTIALS, users)
 
             body = await getFlights(self, data)
 
             if (ACCESS_DENIED in body and body[CAUSE] == NOT_AUTHENTICATED) or (
                 TYPE in body and body[TYPE] == CLIENT_ERROR
             ):
-                refreshedData = await refreshToken(self, data)
+                refreshedData = await refreshToken(self, userData)
 
                 body = await getFlights(self, refreshedData)
 
@@ -403,7 +415,7 @@ class RyanairFlightsCoordinator(DataUpdateCoordinator):
 class RyanairProfileCoordinator(DataUpdateCoordinator):
     """User Profile Coordinator"""
 
-    def __init__(self, hass: HomeAssistant, session, data) -> None:
+    def __init__(self, hass: HomeAssistant, session, fingerprint) -> None:
         """Initialize coordinator."""
 
         super().__init__(
@@ -416,28 +428,33 @@ class RyanairProfileCoordinator(DataUpdateCoordinator):
         )
 
         self.session = session
+        self.fingerprint = fingerprint
 
     async def _async_update_data(self):
         """Fetch data from API endpoint."""
         try:
             data = load_json_object(CREDENTIALS)
+            userData = data[self.fingerprint]
             if X_REMEMBER_ME_TOKEN not in data:
-                rememberMeTokenResp = await rememberMeToken(self, data)
+                rememberMeTokenResp = await rememberMeToken(self, userData)
 
+                users = {}
                 data = {
-                    CONF_DEVICE_FINGERPRINT: data[CONF_DEVICE_FINGERPRINT],
-                    CUSTOMER_ID: data[CUSTOMER_ID],
-                    TOKEN: data[TOKEN],
+                    CONF_DEVICE_FINGERPRINT: userData[CONF_DEVICE_FINGERPRINT],
+                    CUSTOMER_ID: userData[CUSTOMER_ID],
+                    TOKEN: userData[TOKEN],
                     X_REMEMBER_ME_TOKEN: rememberMeTokenResp[TOKEN]
                 }
-                save_json(CREDENTIALS, data)
+
+                users[data[CONF_DEVICE_FINGERPRINT]] = data
+                save_json(CREDENTIALS, users)
 
             body = await getUserProfile(self, data)
 
             if (ACCESS_DENIED in body and body[CAUSE] == NOT_AUTHENTICATED) or (
                 TYPE in body and body[TYPE] == CLIENT_ERROR
             ):
-                refreshedData = await refreshToken(self, data)
+                refreshedData = await refreshToken(self, userData)
 
                 body = await getUserProfile(self, refreshedData)
 

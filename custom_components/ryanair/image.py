@@ -64,11 +64,11 @@ async def async_setup_platform(
     session = async_get_clientsession(hass)
 
     sensors = []
-
+    print(config)
     userData = load_json_object(CREDENTIALS)
 
-    deviceId = userData[CONF_DEVICE_FINGERPRINT]
-    customerId = userData[CUSTOMER_ID]
+    deviceId = config[CONF_DEVICE_FINGERPRINT]
+    customerId = config[CUSTOMER_ID]
 
     bookingData = load_json_object(BOARDING_PASS_PERSISTENCE)
 

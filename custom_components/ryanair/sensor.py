@@ -87,7 +87,10 @@ async def async_setup_platform(
     """Set up the sensor platform."""
     session = async_get_clientsession(hass)
 
-    profileCoordinator = RyanairProfileCoordinator(hass, session, config)
+    data = load_json_object(CREDENTIALS)
+
+    profileCoordinator = RyanairProfileCoordinator(
+        hass, session, config[CONF_DEVICE_FINGERPRINT])
 
     await profileCoordinator.async_config_entry_first_refresh()
 
@@ -98,7 +101,8 @@ async def async_setup_platform(
         name="User Profile",
     )
 
-    flightsCoordinator = RyanairFlightsCoordinator(hass, session, config)
+    flightsCoordinator = RyanairFlightsCoordinator(
+        hass, session, config[CONF_DEVICE_FINGERPRINT])
 
     await flightsCoordinator.async_config_entry_first_refresh()
 
@@ -224,7 +228,7 @@ async def async_setup_platform(
             sensors.append(RyanairFlightCountSensor(
                 bookingRef, upcomingFlights, name, flightCountDescription))
 
-        bookingReferences[credentials[CONF_DEVICE_FINGERPRINT]] = userBookings
+        bookingReferences[config[CONF_DEVICE_FINGERPRINT]] = userBookings
         save_json(BOARDING_PASS_PERSISTENCE, bookingReferences)
 
     async_add_entities(sensors, update_before_add=True)

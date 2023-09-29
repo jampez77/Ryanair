@@ -146,12 +146,15 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             else:
                 # if data is not null and contains MFA TOKEN then initiate MFA capture
                 if CUSTOMER_ID in info["data"]:
+                    users = {}
                     ryanairData = {
                         CONF_DEVICE_FINGERPRINT: user_input[CONF_DEVICE_FINGERPRINT],
                         CUSTOMER_ID: info["data"][CUSTOMER_ID],
                         TOKEN: info["data"][TOKEN],
                     }
-                    save_json(CREDENTIALS, ryanairData)
+
+                    users[user_input[CONF_DEVICE_FINGERPRINT]] = ryanairData
+                    save_json(CREDENTIALS, users)
                     return self.async_create_entry(
                         title=info["title"], data=ryanairData
                     )
@@ -207,15 +210,14 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                             },
                         )
                     if CUSTOMER_ID in info["data"]:
+                        users = {}
                         ryanairData = {
-                            CONF_DEVICE_FINGERPRINT: user_input[
-                                CONF_DEVICE_FINGERPRINT
-                            ],
+                            CONF_DEVICE_FINGERPRINT: user_input[CONF_DEVICE_FINGERPRINT],
                             CUSTOMER_ID: info["data"][CUSTOMER_ID],
                             TOKEN: info["data"][TOKEN],
                         }
-
-                        save_json(CREDENTIALS, ryanairData)
+                        users[user_input[CONF_DEVICE_FINGERPRINT]] = ryanairData
+                        save_json(CREDENTIALS, users)
                         return self.async_create_entry(
                             title=info["title"], data=ryanairData
                         )
