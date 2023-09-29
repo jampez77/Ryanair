@@ -39,10 +39,17 @@ from .const import (
     TYPE,
     BOARDING_PASS_URL,
     BOARDING_PASSES_URI,
-    BOOKING_REFERENCES,
+    BOOKING_REFERENCE,
     BOARDING_PASS_HEADERS,
     EMAIL,
     RECORD_LOCATOR,
+    BOOKING_DETAILS_URL,
+    AUTH_TOKEN,
+    BOOKING_INFO,
+    BOOKING_ID,
+    SURROGATE_ID,
+    CLIENT_VERSION,
+    CLIENT
 )
 from .errors import RyanairError, InvalidAuth, APIRatelimitExceeded, UnknownError
 from homeassistant.exceptions import ConfigEntryAuthFailed
@@ -91,7 +98,7 @@ async def refreshToken(self, data):
         CONF_DEVICE_FINGERPRINT: data[CONF_DEVICE_FINGERPRINT],
         CUSTOMER_ID: data[CUSTOMER_ID],
         TOKEN: rememberMeResponse[TOKEN],
-        X_REMEMBER_ME_TOKEN: data[X_REMEMBER_ME_TOKEN]
+        X_REMEMBER_ME_TOKEN: data[X_REMEMBER_ME_TOKEN],
     }
 
     rememberMeTokenResp = await rememberMeToken(self, ryanairData)
@@ -100,7 +107,7 @@ async def refreshToken(self, data):
         CONF_DEVICE_FINGERPRINT: data[CONF_DEVICE_FINGERPRINT],
         CUSTOMER_ID: data[CUSTOMER_ID],
         TOKEN: rememberMeResponse[TOKEN],
-        X_REMEMBER_ME_TOKEN: rememberMeTokenResp[TOKEN]
+        X_REMEMBER_ME_TOKEN: rememberMeTokenResp[TOKEN],
     }
 
     save_json(CREDENTIALS, ryanairData)
@@ -133,6 +140,7 @@ async def getUserProfile(self, data):
         },
     )
     body = await resp.json()
+
     return body
 
 
@@ -154,6 +162,86 @@ async def getBoardingPasses(self, data, headers):
     return body
 
 
+async def getBookingDetails(self, data, bookingInfo):
+    resp = await self.session.request(
+        method="POST",
+        url=BOOKING_DETAILS_URL,
+        headers={
+            CLIENT_VERSION: "9.9.9",
+            "Content-Type": CONTENT_TYPE_JSON,
+            CONF_DEVICE_FINGERPRINT: data[CONF_DEVICE_FINGERPRINT],
+            CONF_AUTH_TOKEN: data[TOKEN],
+        },
+        json={
+            AUTH_TOKEN: data[TOKEN],
+            BOOKING_INFO: bookingInfo
+        }
+    )
+    body = await resp.json()
+    return body
+
+
+class RyanairBookingDetailsCoordinator(DataUpdateCoordinator):
+    """Booking Details Coordinator"""
+
+    def __init__(self, hass: HomeAssistant, session, bookingInfo) -> None:
+        """Initialize coordinator."""
+
+        super().__init__(
+            hass,
+            _LOGGER,
+            # Name of the data. For logging purposes.
+            name="Ryanair",
+            # Polling interval. Will only be polled if there are subscribers.
+            update_interval=timedelta(minutes=5),
+        )
+        self.hass = hass
+        self.session = session
+        self.bookingInfo = bookingInfo
+
+    async def _async_update_data(self):
+        """Fetch data from API endpoint."""
+        try:
+            data = load_json_object(CREDENTIALS)
+
+            if X_REMEMBER_ME_TOKEN not in data:
+                rememberMeTokenResp = await rememberMeToken(self, data)
+
+                data = {
+                    CONF_DEVICE_FINGERPRINT: data[CONF_DEVICE_FINGERPRINT],
+                    CUSTOMER_ID: data[CUSTOMER_ID],
+                    TOKEN: data[TOKEN],
+                    X_REMEMBER_ME_TOKEN: rememberMeTokenResp[TOKEN],
+                }
+                save_json(CREDENTIALS, data)
+
+            body = await getBookingDetails(self, data, self.bookingInfo)
+
+            if (ACCESS_DENIED in body and body[CAUSE] == NOT_AUTHENTICATED) or (
+                TYPE in body and body[TYPE] == CLIENT_ERROR
+            ):
+                refreshedData = await refreshToken(self, data)
+
+                body = await getBookingDetails(self, refreshedData, self.bookingInfo)
+
+        except InvalidAuth as err:
+            raise ConfigEntryAuthFailed from err
+        except RyanairError as err:
+            raise UpdateFailed(str(err)) from err
+        except ValueError as err:
+            err_str = str(err)
+
+            if "Invalid authentication credentials" in err_str:
+                raise InvalidAuth from err
+            if "API rate limit exceeded." in err_str:
+                raise APIRatelimitExceeded from err
+
+            _LOGGER.exception("Unexpected exception")
+            raise UnknownError from err
+
+        return body
+
+
 class RyanairBoardingPassCoordinator(DataUpdateCoordinator):
     """Boarding Pass Coordinator"""
 
@@ -169,17 +257,23 @@ class RyanairBoardingPassCoordinator(DataUpdateCoordinator):
             update_interval=timedelta(5),
         )
         self.session = session
+        self.email = data[EMAIL]
+        self.device_fingerprint = data[CONF_DEVICE_FINGERPRINT]
 
     async def _async_update_data(self):
         """Fetch data from API endpoint."""
         try:
             boardingPassData = load_json_object(BOARDING_PASS_PERSISTENCE)
+            data = load_json_object(CREDENTIALS)
 
-            if BOOKING_REFERENCES in boardingPassData and EMAIL in boardingPassData:
-                for bookingRef in boardingPassData[BOOKING_REFERENCES]:
+            if self.device_fingerprint in boardingPassData:
+                bookingReferences = boardingPassData[self.device_fingerprint]
+
+            if len(bookingReferences) > 0:
+                for bookingRef in bookingReferences:
                     headers = {
-                        EMAIL: boardingPassData[EMAIL],
-                        RECORD_LOCATOR: bookingRef
+                        EMAIL: self.email,
+                        RECORD_LOCATOR: bookingRef[BOOKING_REFERENCE]
                     }
 
                     data = load_json_object(CREDENTIALS)
@@ -197,33 +291,34 @@ class RyanairBoardingPassCoordinator(DataUpdateCoordinator):
 
                     body = await getBoardingPasses(self, data, headers)
 
-                    if (ACCESS_DENIED in body and body[CAUSE] == NOT_AUTHENTICATED) or (
+                    if body is not None and ((ACCESS_DENIED in body and body[CAUSE] == NOT_AUTHENTICATED) or (
                         TYPE in body and body[TYPE] == CLIENT_ERROR
-                    ):
+                    )):
                         refreshedData = await refreshToken(self, data)
 
                         body = await getBoardingPasses(self, refreshedData, headers)
 
-                    for boardingPass in body:
-                        aztec_code = AztecCode(boardingPass['barcode'])
+                    if body is not None:
+                        for boardingPass in body:
+                            aztec_code = AztecCode(boardingPass['barcode'])
 
-                        flightName = "(" + boardingPass["flight"]["label"] + ") " + \
-                            boardingPass["departure"]["name"] + \
-                            " - " + boardingPass["arrival"]["name"]
+                            flightName = "(" + boardingPass["flight"]["label"] + ") " + \
+                                boardingPass["departure"]["name"] + \
+                                " - " + boardingPass["arrival"]["name"]
 
-                        seat = boardingPass["seat"]["designator"]
+                            seat = boardingPass["seat"]["designator"]
 
-                        passenger = boardingPass["name"]["first"] + \
-                            " " + boardingPass["name"]["last"]
+                            passenger = boardingPass["name"]["first"] + \
+                                " " + boardingPass["name"]["last"]
 
-                        name = passenger + ": " + \
-                            flightName + "(" + seat + ")"
+                            name = passenger + ": " + \
+                                flightName + "(" + seat + ")"
 
-                        fileName = re.sub(
-                            "[\W_]", "", name + boardingPass["departure"]["dateUTC"]) + ".png"
+                            fileName = re.sub(
+                                "[\W_]", "", name + boardingPass["departure"]["dateUTC"]) + ".png"
 
-                        aztec_code.save(
-                            Path(__file__).parent / BOARDING_PASSES_URI / fileName, module_size=16)
+                            aztec_code.save(
+                                Path(__file__).parent / BOARDING_PASSES_URI / fileName, module_size=16)
             else:
                 body = None
 
@@ -274,7 +369,7 @@ class RyanairFlightsCoordinator(DataUpdateCoordinator):
                     CONF_DEVICE_FINGERPRINT: data[CONF_DEVICE_FINGERPRINT],
                     CUSTOMER_ID: data[CUSTOMER_ID],
                     TOKEN: data[TOKEN],
-                    X_REMEMBER_ME_TOKEN: rememberMeTokenResp[TOKEN]
+                    X_REMEMBER_ME_TOKEN: rememberMeTokenResp[TOKEN],
                 }
                 save_json(CREDENTIALS, data)
 
@@ -286,9 +381,6 @@ class RyanairFlightsCoordinator(DataUpdateCoordinator):
                 refreshedData = await refreshToken(self, data)
 
                 body = await getFlights(self, refreshedData)
-
-            RyanairBoardingPassCoordinator(
-                self.hass, self.session, self.config)
 
         except InvalidAuth as err:
             raise ConfigEntryAuthFailed from err

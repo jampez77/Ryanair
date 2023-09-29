@@ -12,8 +12,13 @@ from .const import (
     CAUSE,
     BOARDING_PASS_HEADERS,
     BOOKING_REFERENCES,
+    BOOKING_REFERENCE,
+    BOOKING_ID,
     EMAIL,
     TYPE,
+    PRODUCT_ID,
+    CONF_DEVICE_FINGERPRINT,
+    PERSISTENCE
 )
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.entity import DeviceInfo
@@ -38,6 +43,7 @@ _LOGGER = logging.getLogger(__name__)
 # Time between updating data from GitHub
 SCAN_INTERVAL = timedelta(minutes=5)
 BOARDING_PASS_PERSISTENCE = Path(__file__).parent / BOARDING_PASS_HEADERS
+CREDENTIALS = Path(__file__).parent / PERSISTENCE
 
 
 def deviceInfo(name) -> DeviceInfo:
@@ -48,6 +54,16 @@ def deviceInfo(name) -> DeviceInfo:
         name=name,
         configuration_url="https://github.com/jampez77/Ryanair/",
     )
+
+
+def getProfileName(coordinator) -> str:
+    name = coordinator.data["email"]
+
+    if "firstName" in coordinator.data:
+        name = coordinator.data["firstName"]
+        if "lastName" in coordinator.data:
+            name = name + " " + coordinator.data["lastName"]
+    return name
 
 
 async def async_setup_entry(
@@ -91,30 +107,26 @@ async def async_setup_platform(
     sensors = []
 
     if (ACCESS_DENIED not in profileCoordinator.data and CAUSE not in profileCoordinator.data and TYPE not in profileCoordinator.data):
-        data = load_json_object(BOARDING_PASS_PERSISTENCE)
-
-        if BOOKING_REFERENCES in data:
-            data = {
-                EMAIL: profileCoordinator.data["email"],
-                BOOKING_REFERENCES: data[BOOKING_REFERENCES]
-            }
-        else:
-            data = {
-                EMAIL: profileCoordinator.data["email"]
-            }
-        save_json(BOARDING_PASS_PERSISTENCE, data)
         sensors.append(RyanairProfileSensor(
             profileCoordinator, name, profileDescription))
 
+    credentials = load_json_object(CREDENTIALS)
+
     if "items" in flightsCoordinator.data and len(flightsCoordinator.data["items"]) > 0:
-        boardingPasses = []
+
+        bookingReferences = {}
+        userBookings = []
         for item in flightsCoordinator.data["items"]:
 
             flights = item["rawBooking"]["flights"]
             bookingRef = item["rawBooking"]["recordLocator"]
-            boardingPasses.append(bookingRef)
             seats = item["rawBooking"]["seats"]
             passengers = item["rawBooking"]["passengers"]
+
+            userBookings.append({
+                BOOKING_ID: item[PRODUCT_ID],
+                BOOKING_REFERENCE: bookingRef,
+            })
 
             itinerary = {
                 "status": item["rawBooking"]["status"],
@@ -208,23 +220,12 @@ async def async_setup_platform(
                 name="Upcoming Flights",
             )
 
-            name = profileCoordinator.data["firstName"] + \
-                " " + profileCoordinator.data["lastName"]
+            name = getProfileName(profileCoordinator)
             sensors.append(RyanairFlightCountSensor(
                 bookingRef, upcomingFlights, name, flightCountDescription))
 
-        data = load_json_object(BOARDING_PASS_PERSISTENCE)
-
-        if EMAIL in data:
-            data = {
-                EMAIL: data[EMAIL],
-                BOOKING_REFERENCES: boardingPasses
-            }
-        else:
-            data = {
-                BOOKING_REFERENCES: boardingPasses
-            }
-        save_json(BOARDING_PASS_PERSISTENCE, data)
+        bookingReferences[credentials[CONF_DEVICE_FINGERPRINT]] = userBookings
+        save_json(BOARDING_PASS_PERSISTENCE, bookingReferences)
 
     async_add_entities(sensors, update_before_add=True)
 
@@ -410,17 +411,14 @@ class RyanairProfileSensor(CoordinatorEntity[RyanairProfileCoordinator], SensorE
         """Initialize."""
         super().__init__(coordinator)
 
-        self._attr_device_info = deviceInfo(self.coordinator.data["firstName"]
-                                            + " "
-                                            + self.coordinator.data["lastName"])
+        name = getProfileName(coordinator)
+
+        self._attr_device_info = deviceInfo(name)
         self._attr_unique_id = f"Ryanair_{name}-{description.key}".lower()
         self._attrs: dict[str, Any] = {}
         self.entity_description = description
         self._state = None
-        self._name = (
-            self.coordinator.data["firstName"] +
-            " " + self.coordinator.data["lastName"]
-        )
+        self._name = name
         self._available = True
 
     @property
