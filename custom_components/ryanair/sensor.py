@@ -114,11 +114,9 @@ async def async_setup_platform(
         sensors.append(RyanairProfileSensor(
             profileCoordinator, name, profileDescription))
 
-    credentials = load_json_object(CREDENTIALS)
-
     if "items" in flightsCoordinator.data and len(flightsCoordinator.data["items"]) > 0:
 
-        bookingReferences = {}
+        bookingReferences = load_json_object(BOARDING_PASS_PERSISTENCE)
         userBookings = []
         for item in flightsCoordinator.data["items"]:
 

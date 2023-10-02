@@ -11,6 +11,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.const import CONF_EMAIL, CONF_PASSWORD
 from homeassistant.helpers.json import save_json
+from homeassistant.util.json import load_json_object
 from .const import (
     DOMAIN,
     CONF_DEVICE_FINGERPRINT,
@@ -146,13 +147,12 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             else:
                 # if data is not null and contains MFA TOKEN then initiate MFA capture
                 if CUSTOMER_ID in info["data"]:
-                    users = {}
+                    users = load_json_object(CREDENTIALS)
                     ryanairData = {
                         CONF_DEVICE_FINGERPRINT: user_input[CONF_DEVICE_FINGERPRINT],
                         CUSTOMER_ID: info["data"][CUSTOMER_ID],
                         TOKEN: info["data"][TOKEN],
                     }
-
                     users[user_input[CONF_DEVICE_FINGERPRINT]] = ryanairData
                     save_json(CREDENTIALS, users)
                     return self.async_create_entry(
@@ -210,7 +210,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                             },
                         )
                     if CUSTOMER_ID in info["data"]:
-                        users = {}
+                        users = load_json_object(CREDENTIALS)
                         ryanairData = {
                             CONF_DEVICE_FINGERPRINT: user_input[CONF_DEVICE_FINGERPRINT],
                             CUSTOMER_ID: info["data"][CUSTOMER_ID],
