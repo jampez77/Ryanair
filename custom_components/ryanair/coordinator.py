@@ -282,7 +282,7 @@ class RyanairBoardingPassCoordinator(DataUpdateCoordinator):
 
                     data = load_json_object(CREDENTIALS)
                     userData = data[self.device_fingerprint]
-                    if X_REMEMBER_ME_TOKEN not in data:
+                    if X_REMEMBER_ME_TOKEN not in userData:
                         rememberMeTokenResp = await rememberMeToken(self, userData)
 
                         users = load_json_object(CREDENTIALS)
@@ -371,7 +371,7 @@ class RyanairFlightsCoordinator(DataUpdateCoordinator):
         try:
             data = load_json_object(CREDENTIALS)
             userData = data[self.fingerprint]
-            if X_REMEMBER_ME_TOKEN not in data:
+            if X_REMEMBER_ME_TOKEN not in userData:
                 rememberMeTokenResp = await rememberMeToken(self, userData)
                 users = load_json_object(CREDENTIALS)
                 data = {
@@ -434,7 +434,7 @@ class RyanairProfileCoordinator(DataUpdateCoordinator):
         try:
             data = load_json_object(CREDENTIALS)
             userData = data[self.fingerprint]
-            if X_REMEMBER_ME_TOKEN not in data:
+            if X_REMEMBER_ME_TOKEN not in userData:
                 rememberMeTokenResp = await rememberMeToken(self, userData)
 
                 users = load_json_object(CREDENTIALS)
