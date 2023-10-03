@@ -64,54 +64,51 @@ BOARDING_PASS_PERSISTENCE = Path(__file__).parent / BOARDING_PASS_HEADERS
 CREDENTIALS = Path(__file__).parent / PERSISTENCE
 
 
-async def rememberMeToken(self, data):
+async def rememberMeToken(self, userData):
+
     rememberMeTokenResp = await self.session.request(
         method="GET",
         url=USER_PROFILE_URL
         + ACCOUNTS
         + "/"
-        + data[CUSTOMER_ID]
+        + userData[CUSTOMER_ID]
         + "/"
         + REMEMBER_ME_TOKEN,
         headers={
-            CONF_DEVICE_FINGERPRINT: data[CONF_DEVICE_FINGERPRINT],
-            CONF_AUTH_TOKEN: data[TOKEN],
+            CONF_DEVICE_FINGERPRINT: userData[CONF_DEVICE_FINGERPRINT],
+            CONF_AUTH_TOKEN: userData[TOKEN],
         },
     )
     rememberMeTokenResponse = await rememberMeTokenResp.json()
-    return rememberMeTokenResponse
+    print(rememberMeTokenResponse)
+    users = load_json_object(CREDENTIALS)
+
+    users[userData[CONF_DEVICE_FINGERPRINT]
+          ][X_REMEMBER_ME_TOKEN] = rememberMeTokenResponse[TOKEN]
+
+    save_json(CREDENTIALS, users)
+
+    return load_json_object(CREDENTIALS)
 
 
-async def refreshToken(self, data):
+async def refreshToken(self, userData):
     rememberMeResp = await self.session.request(
         method="GET",
         url=USER_PROFILE_URL + ACCOUNTS + "/" + REMEMBER_ME,
         headers={
-            CONF_DEVICE_FINGERPRINT: data[CONF_DEVICE_FINGERPRINT],
-            X_REMEMBER_ME_TOKEN: data[X_REMEMBER_ME_TOKEN],
+            CONF_DEVICE_FINGERPRINT: userData[CONF_DEVICE_FINGERPRINT],
+            X_REMEMBER_ME_TOKEN: userData[X_REMEMBER_ME_TOKEN],
         },
     )
     rememberMeResponse = await rememberMeResp.json()
-    ryanairData = {
-        CONF_DEVICE_FINGERPRINT: data[CONF_DEVICE_FINGERPRINT],
-        CUSTOMER_ID: data[CUSTOMER_ID],
-        TOKEN: rememberMeResponse[TOKEN],
-        X_REMEMBER_ME_TOKEN: data[X_REMEMBER_ME_TOKEN],
-    }
 
-    rememberMeTokenResp = await rememberMeToken(self, ryanairData)
-    users = load_json_object(CREDENTIALS)
-    ryanairData = {
-        CONF_DEVICE_FINGERPRINT: data[CONF_DEVICE_FINGERPRINT],
-        CUSTOMER_ID: data[CUSTOMER_ID],
-        TOKEN: rememberMeResponse[TOKEN],
-        X_REMEMBER_ME_TOKEN: rememberMeTokenResp[TOKEN],
-    }
+    users = await rememberMeToken(self, userData)
 
-    users[data[CONF_DEVICE_FINGERPRINT]] = ryanairData
+    users[userData[CONF_DEVICE_FINGERPRINT]][TOKEN] = rememberMeResponse[TOKEN]
 
     save_json(CREDENTIALS, users)
-    return ryanairData
+
+    return load_json_object(CREDENTIALS)
 
 
 async def getFlights(self, data):
@@ -205,28 +202,17 @@ class RyanairBookingDetailsCoordinator(DataUpdateCoordinator):
             data = load_json_object(CREDENTIALS)
             userData = data[self.fingerprint]
             if X_REMEMBER_ME_TOKEN not in userData:
-                rememberMeTokenResp = await rememberMeToken(self, userData)
-
-                users = load_json_object(CREDENTIALS)
-                data = {
-                    CONF_DEVICE_FINGERPRINT: userData[CONF_DEVICE_FINGERPRINT],
-                    CUSTOMER_ID: userData[CUSTOMER_ID],
-                    TOKEN: userData[TOKEN],
-                    X_REMEMBER_ME_TOKEN: rememberMeTokenResp[TOKEN],
-                }
-
-                users[data[CONF_DEVICE_FINGERPRINT]] = data
-
-                save_json(CREDENTIALS, users)
+                userData = await rememberMeToken(self, userData)
+                userData = userData[self.fingerprint]
 
             body = await getBookingDetails(self, userData, self.bookingInfo)
 
             if (ACCESS_DENIED in body and body[CAUSE] == NOT_AUTHENTICATED) or (
                 TYPE in body and body[TYPE] == CLIENT_ERROR
             ):
-                refreshedData = await refreshToken(self, userData)
+                userData = await refreshToken(self, userData)
 
-                body = await getBookingDetails(self, refreshedData, self.bookingInfo)
+                body = await getBookingDetails(self, userData[self.fingerprint], self.bookingInfo)
 
         except InvalidAuth as err:
             raise ConfigEntryAuthFailed from err
@@ -262,7 +248,7 @@ class RyanairBoardingPassCoordinator(DataUpdateCoordinator):
         )
         self.session = session
         self.email = data[EMAIL]
-        self.device_fingerprint = data[CONF_DEVICE_FINGERPRINT]
+        self.fingerprint = data[CONF_DEVICE_FINGERPRINT]
 
     async def _async_update_data(self):
         """Fetch data from API endpoint."""
@@ -270,8 +256,8 @@ class RyanairBoardingPassCoordinator(DataUpdateCoordinator):
             boardingPassData = load_json_object(BOARDING_PASS_PERSISTENCE)
             data = load_json_object(CREDENTIALS)
 
-            if self.device_fingerprint in boardingPassData:
-                bookingReferences = boardingPassData[self.device_fingerprint]
+            if self.fingerprint in boardingPassData:
+                bookingReferences = boardingPassData[self.fingerprint]
 
             if len(bookingReferences) > 0:
                 for bookingRef in bookingReferences:
@@ -281,30 +267,19 @@ class RyanairBoardingPassCoordinator(DataUpdateCoordinator):
                     }
 
                     data = load_json_object(CREDENTIALS)
-                    userData = data[self.device_fingerprint]
+                    userData = data[self.fingerprint]
                     if X_REMEMBER_ME_TOKEN not in userData:
-                        rememberMeTokenResp = await rememberMeToken(self, userData)
+                        userData = await rememberMeToken(self, userData)
+                        userData = userData[self.fingerprint]
 
-                        users = load_json_object(CREDENTIALS)
-                        data = {
-                            CONF_DEVICE_FINGERPRINT: userData[CONF_DEVICE_FINGERPRINT],
-                            CUSTOMER_ID: userData[CUSTOMER_ID],
-                            TOKEN: userData[TOKEN],
-                            X_REMEMBER_ME_TOKEN: rememberMeTokenResp[TOKEN],
-                        }
-
-                        users[data[CONF_DEVICE_FINGERPRINT]] = data
-                        save_json(CREDENTIALS, users)
-
-                    body = await getBoardingPasses(self, data, headers)
+                    body = await getBoardingPasses(self, userData, headers)
 
                     if body is not None and ((ACCESS_DENIED in body and body[CAUSE] == NOT_AUTHENTICATED) or (
                         TYPE in body and body[TYPE] == CLIENT_ERROR
                     )):
-                        userData = data[self.device_fingerprint]
-                        refreshedData = await refreshToken(self, userData)
+                        userData = await refreshToken(self, userData)
 
-                        body = await getBoardingPasses(self, refreshedData, headers)
+                        body = await getBoardingPasses(self, userData[self.fingerprint], headers)
 
                     if body is not None:
                         for boardingPass in body:
@@ -372,26 +347,17 @@ class RyanairFlightsCoordinator(DataUpdateCoordinator):
             data = load_json_object(CREDENTIALS)
             userData = data[self.fingerprint]
             if X_REMEMBER_ME_TOKEN not in userData:
-                rememberMeTokenResp = await rememberMeToken(self, userData)
-                users = load_json_object(CREDENTIALS)
-                data = {
-                    CONF_DEVICE_FINGERPRINT: userData[CONF_DEVICE_FINGERPRINT],
-                    CUSTOMER_ID: userData[CUSTOMER_ID],
-                    TOKEN: userData[TOKEN],
-                    X_REMEMBER_ME_TOKEN: rememberMeTokenResp[TOKEN]
-                }
+                userData = await rememberMeToken(self, userData)
+                userData = userData[self.fingerprint]
 
-                users[data[CONF_DEVICE_FINGERPRINT]] = data
-                save_json(CREDENTIALS, users)
-
-            body = await getFlights(self, data)
+            body = await getFlights(self, userData)
 
             if (ACCESS_DENIED in body and body[CAUSE] == NOT_AUTHENTICATED) or (
                 TYPE in body and body[TYPE] == CLIENT_ERROR
             ):
-                refreshedData = await refreshToken(self, userData)
+                userData = await refreshToken(self, userData)
 
-                body = await getFlights(self, refreshedData)
+                body = await getFlights(self, userData[self.fingerprint])
 
         except InvalidAuth as err:
             raise ConfigEntryAuthFailed from err
@@ -435,27 +401,17 @@ class RyanairProfileCoordinator(DataUpdateCoordinator):
             data = load_json_object(CREDENTIALS)
             userData = data[self.fingerprint]
             if X_REMEMBER_ME_TOKEN not in userData:
-                rememberMeTokenResp = await rememberMeToken(self, userData)
+                userData = await rememberMeToken(self, userData)
+                userData = userData[self.fingerprint]
 
-                users = load_json_object(CREDENTIALS)
-                data = {
-                    CONF_DEVICE_FINGERPRINT: userData[CONF_DEVICE_FINGERPRINT],
-                    CUSTOMER_ID: userData[CUSTOMER_ID],
-                    TOKEN: userData[TOKEN],
-                    X_REMEMBER_ME_TOKEN: rememberMeTokenResp[TOKEN]
-                }
-
-                users[data[CONF_DEVICE_FINGERPRINT]] = data
-                save_json(CREDENTIALS, users)
-
-            body = await getUserProfile(self, data)
+            body = await getUserProfile(self, userData)
 
             if (ACCESS_DENIED in body and body[CAUSE] == NOT_AUTHENTICATED) or (
                 TYPE in body and body[TYPE] == CLIENT_ERROR
             ):
-                refreshedData = await refreshToken(self, userData)
+                userData = await refreshToken(self, userData)
 
-                body = await getUserProfile(self, refreshedData)
+                body = await getUserProfile(self, userData[self.fingerprint])
 
         except InvalidAuth as err:
             raise ConfigEntryAuthFailed from err
