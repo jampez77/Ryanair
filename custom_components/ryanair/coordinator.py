@@ -80,11 +80,21 @@ async def rememberMeToken(self, userData):
         },
     )
     rememberMeTokenResponse = await rememberMeTokenResp.json()
-    print(rememberMeTokenResponse)
+
     users = load_json_object(CREDENTIALS)
 
-    users[userData[CONF_DEVICE_FINGERPRINT]
-          ][X_REMEMBER_ME_TOKEN] = rememberMeTokenResponse[TOKEN]
+    if rememberMeTokenResponse is not None and ((ACCESS_DENIED in rememberMeTokenResponse and rememberMeTokenResponse[CAUSE] == NOT_AUTHENTICATED) or (
+        TYPE in rememberMeTokenResponse and rememberMeTokenResponse[TYPE] == CLIENT_ERROR
+    )):
+        authResponse = await authenticateUser(self, userData)
+
+        users[userData[CONF_DEVICE_FINGERPRINT]
+              ][TOKEN] = authResponse[TOKEN]
+        users[userData[CONF_DEVICE_FINGERPRINT]
+              ][CUSTOMER_ID] = authResponse[CUSTOMER_ID]
+    else:
+        users[userData[CONF_DEVICE_FINGERPRINT]
+              ][X_REMEMBER_ME_TOKEN] = rememberMeTokenResponse[TOKEN]
 
     save_json(CREDENTIALS, users)
 
@@ -172,6 +182,24 @@ async def getBookingDetails(self, data, bookingInfo):
             AUTH_TOKEN: data[TOKEN],
             BOOKING_INFO: bookingInfo
         }
+    )
+    body = await resp.json()
+    return body
+
+
+async def authenticateUser(self, userData):
+    resp = await self.session.request(
+        method="POST",
+        url=USER_PROFILE_URL + ACCOUNT_LOGIN,
+        headers={
+            "Content-Type": CONTENT_TYPE_JSON,
+            CONF_DEVICE_FINGERPRINT: userData[CONF_DEVICE_FINGERPRINT],
+        },
+        json={
+            CONF_EMAIL: userData[CONF_EMAIL],
+            CONF_PASSWORD: userData[CONF_PASSWORD],
+            CONF_POLICY_AGREED: "true",
+        },
     )
     body = await resp.json()
     return body
@@ -488,7 +516,7 @@ class RyanairMfaCoordinator(DataUpdateCoordinator):
 class RyanairCoordinator(DataUpdateCoordinator):
     """Data coordinator."""
 
-    def __init__(self, hass: HomeAssistant, session, data) -> None:
+    def __init__(self, hass: HomeAssistant, session, userData) -> None:
         """Initialize coordinator."""
 
         super().__init__(
@@ -501,9 +529,7 @@ class RyanairCoordinator(DataUpdateCoordinator):
         )
 
         self.session = session
-        self.email = data[CONF_EMAIL]
-        self.password = data[CONF_PASSWORD]
-        self.fingerprint = data[CONF_DEVICE_FINGERPRINT]
+        self.userData = userData
 
     async def _async_update_data(self):
         """Fetch data from API endpoint.
@@ -512,21 +538,7 @@ class RyanairCoordinator(DataUpdateCoordinator):
         so entities can quickly look up their data.
         """
         try:
-            resp = await self.session.request(
-                method="POST",
-                url=USER_PROFILE_URL + ACCOUNT_LOGIN,
-                headers={
-                    "Content-Type": CONTENT_TYPE_JSON,
-                    CONF_DEVICE_FINGERPRINT: self.fingerprint,
-                },
-                json={
-                    CONF_EMAIL: self.email,
-                    CONF_PASSWORD: self.password,
-                    CONF_POLICY_AGREED: "true",
-                },
-            )
-            body = await resp.json()
-
+            body = await authenticateUser(self, self.userData)
         except InvalidAuth as err:
             raise ConfigEntryAuthFailed from err
         except RyanairError as err:

@@ -148,15 +148,17 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 # if data is not null and contains MFA TOKEN then initiate MFA capture
                 if CUSTOMER_ID in info["data"]:
                     users = load_json_object(CREDENTIALS)
-                    ryanairData = {
-                        CONF_DEVICE_FINGERPRINT: user_input[CONF_DEVICE_FINGERPRINT],
-                        CUSTOMER_ID: info["data"][CUSTOMER_ID],
-                        TOKEN: info["data"][TOKEN],
-                    }
-                    users[user_input[CONF_DEVICE_FINGERPRINT]] = ryanairData
+
+                    users[user_input[CONF_DEVICE_FINGERPRINT]
+                          ][CONF_DEVICE_FINGERPRINT] = user_input[CONF_DEVICE_FINGERPRINT]
+                    users[user_input[CONF_DEVICE_FINGERPRINT]
+                          ][CUSTOMER_ID] = info["data"][CUSTOMER_ID]
+                    users[user_input[CONF_DEVICE_FINGERPRINT]
+                          ][TOKEN] = info["data"][TOKEN]
+
                     save_json(CREDENTIALS, users)
                     return self.async_create_entry(
-                        title=info["title"], data=ryanairData
+                        title=info["title"], data=users[user_input[CONF_DEVICE_FINGERPRINT]]
                     )
 
         return self.async_show_form(
@@ -187,6 +189,14 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         user_input[CONF_DEVICE_FINGERPRINT] = self._fingerprint
 
+        users = load_json_object(CREDENTIALS)
+        ryanairData = {
+            CONF_EMAIL: user_input[CONF_EMAIL],
+            CONF_PASSWORD: user_input[CONF_PASSWORD],
+            CONF_DEVICE_FINGERPRINT: user_input[CONF_DEVICE_FINGERPRINT],
+        }
+        users[user_input[CONF_DEVICE_FINGERPRINT]] = ryanairData
+        save_json(CREDENTIALS, users)
         try:
             info = await validate_input(self.hass, user_input)
         except CannotConnect:
@@ -211,15 +221,17 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         )
                     if CUSTOMER_ID in info["data"]:
                         users = load_json_object(CREDENTIALS)
-                        ryanairData = {
-                            CONF_DEVICE_FINGERPRINT: user_input[CONF_DEVICE_FINGERPRINT],
-                            CUSTOMER_ID: info["data"][CUSTOMER_ID],
-                            TOKEN: info["data"][TOKEN],
-                        }
-                        users[user_input[CONF_DEVICE_FINGERPRINT]] = ryanairData
+
+                        users[user_input[CONF_DEVICE_FINGERPRINT]
+                              ][CONF_DEVICE_FINGERPRINT] = user_input[CONF_DEVICE_FINGERPRINT]
+                        users[user_input[CONF_DEVICE_FINGERPRINT]
+                              ][CUSTOMER_ID] = info["data"][CUSTOMER_ID]
+                        users[user_input[CONF_DEVICE_FINGERPRINT]
+                              ][TOKEN] = info["data"][TOKEN]
+
                         save_json(CREDENTIALS, users)
                         return self.async_create_entry(
-                            title=info["title"], data=ryanairData
+                            title=info["title"], data=users[user_input[CONF_DEVICE_FINGERPRINT]]
                         )
 
         return self.async_show_form(
