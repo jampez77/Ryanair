@@ -114,6 +114,7 @@ async def async_setup_platform(
         sensors.append(RyanairProfileSensor(
             profileCoordinator, name, profileDescription))
 
+    upcomingFlights = 0
     if "items" in flightsCoordinator.data and len(flightsCoordinator.data["items"]) > 0:
 
         bookingReferences = load_json_object(BOARDING_PASS_PERSISTENCE)
@@ -191,7 +192,6 @@ async def async_setup_platform(
 
                 itinerary["journeys"].insert(flight["journeyNum"], journey)
 
-                upcomingFlights = 0
                 for journey in itinerary["journeys"]:
 
                     checkInInfo = {
@@ -217,17 +217,17 @@ async def async_setup_platform(
                         sensors.append(RyanairFlightSensor(
                             flightsCoordinator, bookingRef, checkInInfo, flight, flightDescription))
 
-            flightCountDescription = SensorEntityDescription(
-                key=f"Ryanair_flight-count{name}",
-                name="Upcoming Flights",
-            )
-
-            name = getProfileName(profileCoordinator)
-            sensors.append(RyanairFlightCountSensor(
-                bookingRef, upcomingFlights, name, flightCountDescription))
-
         bookingReferences[config[CONF_DEVICE_FINGERPRINT]] = userBookings
         save_json(BOARDING_PASS_PERSISTENCE, bookingReferences)
+
+    flightCountDescription = SensorEntityDescription(
+        key=f"Ryanair_flight-count{name}",
+        name="Upcoming Flights",
+    )
+
+    name = getProfileName(profileCoordinator)
+    sensors.append(RyanairFlightCountSensor(
+        upcomingFlights, name, flightCountDescription))
 
     async_add_entities(sensors, update_before_add=True)
 
@@ -237,16 +237,14 @@ class RyanairFlightCountSensor(SensorEntity):
 
     def __init__(
         self,
-        bookingRef: str,
         upcomingFlights: int,
         name: str,
         description: SensorEntityDescription,
     ) -> None:
         """Initialize."""
         self._name = "Upcoming Flights"
-        self.bookingRef = bookingRef
         self._attr_device_info = self._attr_device_info = deviceInfo(name)
-        self._attr_unique_id = f"Ryanair_flight-count-{self.bookingRef}-{name}-{description.key}".lower(
+        self._attr_unique_id = f"Ryanair_flight-count-{name}-{description.key}".lower(
         )
         self._attrs: dict[str, Any] = {}
         self.entity_description = description
