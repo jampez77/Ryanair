@@ -30,7 +30,15 @@ Enjoying this? Help me out with a :beers: or :coffee:!
 
 
 ## Installation through [HACS](https://hacs.xyz/)
-Use [HACS](https://hacs.xyz/) to install the **Ryanair** integration.
+There is an active [PR](https://github.com/hacs/default/pull/2059) to get this into [HACS](https://hacs.xyz/), once that is merged then you can install the **Ryanair** integration by searching for it there in HA instance.
+
+Until then you will have to add this repository manually:
+
+Go to HACS -> 3 dot menu -> Custom Repositories:- 
+
+Paste `https://github.com/jampez77/Ryanair` into Repository field and select `Integration`
+
+Now you should be able to find it in HACS as normal.
 
 ## Manual Installation
 Use this route only if you do not want to use [HACS](https://hacs.xyz/) and love the pain of manually installing regular updates.
