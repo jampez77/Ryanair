@@ -311,25 +311,28 @@ class RyanairBoardingPassCoordinator(DataUpdateCoordinator):
 
                     if body is not None:
                         for boardingPass in body:
-                            aztec_code = AztecCode(boardingPass['barcode'])
+                            try: 
+                                aztec_code = AztecCode(boardingPass['barcode'])
 
-                            flightName = "(" + boardingPass["flight"]["label"] + ") " + \
-                                boardingPass["departure"]["name"] + \
-                                " - " + boardingPass["arrival"]["name"]
+                                flightName = "(" + boardingPass["flight"]["label"] + ") " + \
+                                    boardingPass["departure"]["name"] + \
+                                    " - " + boardingPass["arrival"]["name"]
 
-                            seat = boardingPass["seat"]["designator"]
+                                seat = boardingPass["seat"]["designator"]
 
-                            passenger = boardingPass["name"]["first"] + \
-                                " " + boardingPass["name"]["last"]
+                                passenger = boardingPass["name"]["first"] + \
+                                    " " + boardingPass["name"]["last"]
 
-                            name = passenger + ": " + \
-                                flightName + "(" + seat + ")"
+                                name = passenger + ": " + \
+                                    flightName + "(" + seat + ")"
 
-                            fileName = re.sub(
-                                "[\W_]", "", name + boardingPass["departure"]["dateUTC"]) + ".png"
+                                fileName = re.sub(
+                                    "[\W_]", "", name + boardingPass["departure"]["dateUTC"]) + ".png"
 
-                            aztec_code.save(
-                                Path(__file__).parent / BOARDING_PASSES_URI / fileName, module_size=16)
+                                aztec_code.save(
+                                    Path(__file__).parent / BOARDING_PASSES_URI / fileName, module_size=16)
+                            except:
+                                print("Unable to parse barcode")
             else:
                 body = None
 

@@ -377,11 +377,26 @@ class RyanairFlightSensor(CoordinatorEntity[RyanairFlightsCoordinator], SensorEn
 
                 now_utc = dt_util.utcnow().timestamp()
 
-                checkInOpenUTC = datetime.strptime(
+                checkInOpenUTC = 0
+
+                if "checkInOpen" in self.flight:
+                    checkInOpenUTC = datetime.strptime(
                     self.flight["checkInOpen"], "%Y-%m-%dT%H:%M:%SZ").timestamp()
 
-                checkInCloseUTC = datetime.strptime(
+                if "checkInOpen" in self.checkInInfo:
+                    checkInOpenUTC = datetime.strptime(
+                    self.checkInInfo["checkInOpen"], "%Y-%m-%dT%H:%M:%SZ").timestamp()
+
+                checkInCloseUTC = 0
+
+                if "checkInClose" in self.flight:
+                    checkInCloseUTC = datetime.strptime(
                     self.flight["checkInClose"], "%Y-%m-%dT%H:%M:%SZ").timestamp()
+
+                if "checkInClose" in self.checkInInfo:
+                    checkInCloseUTC = datetime.strptime(
+                    self.checkInInfo["checkInClose"], "%Y-%m-%dT%H:%M:%SZ").timestamp()
+
 
                 if now_utc < checkInOpenUTC:
                     state = "Check-in not open"

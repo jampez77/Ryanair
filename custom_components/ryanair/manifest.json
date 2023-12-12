@@ -12,6 +12,6 @@
   "issue_tracker": "https://github.com/jampez77/Ryanair/issues",
   "requirements": ["aztec-code-generator==0.11"],
   "ssdp": [],
-  "version": "2023.10.2",
+  "version": "2023.12.0",
   "zeroconf": []
 }
