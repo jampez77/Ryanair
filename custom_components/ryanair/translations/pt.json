@@ -1,0 +1,30 @@
+{
+    "config": {
+        "abort": {
+            "already_configured": "Equipamento já configurado"
+        },
+        "error": {
+            "cannot_connect": "Falha na ligação",
+            "invalid_auth": "Autenticação invalida",
+            "invalid_mfa_code": "Codigo MFA errado",
+            "unknown": "Unexpected error"
+        },
+        "step": {
+            "mfa": {
+                "data": {
+                    "mfa_code": "Código MFA (8-digitos)"
+                },
+                "description": "{email}",
+                "title": "Inserir o código MFA"
+            },
+            "user": {
+                "data": {
+                    "email": "Email",
+                    "host": "servidor",
+                    "password": "senha"
+                },
+                "description": "{retries}"
+            }
+        }
+    }
+}
