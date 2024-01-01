@@ -7,13 +7,13 @@ This component will allow you to bring your upcoming Ryanair flight information 
 * Check in open / close time.
 * Arrival / departure time.
 * Passengers name and seat number.
-* Mobile frienldy boarding passes.
+* Mobile friendly boarding passes.
 * Number of upcoming flights.
 * Flight cancellation status.
 * Ryanair user account information.
 * Upcoming flights count.
 
-This project is very much a work in progress and there are still many issue that need addressing. If you have the skills, time and implication then please feel free to contribute.
+This project is very much a work in progress and there are still many issues that need addressing. If you have the skills, time and implication then please feel free to contribute.
 
 
 ---
