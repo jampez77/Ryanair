@@ -23,7 +23,8 @@ from .const import (
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
-from homeassistant.util.json import load_json_object
+from homeassistant.exceptions import HomeAssistantError
+from homeassistant.util.json import load_json_object, JsonObjectType
 from homeassistant.helpers.json import save_json
 from homeassistant.config_entries import ConfigEntry
 
@@ -38,12 +39,16 @@ from pathlib import Path
 from homeassistant.util import dt as dt_util
 from datetime import datetime
 from .coordinator import RyanairProfileCoordinator, RyanairFlightsCoordinator
-from homeassistant.util.json import JsonObjectType
+
 _LOGGER = logging.getLogger(__name__)
 # Time between updating data from GitHub
 SCAN_INTERVAL = timedelta(minutes=5)
 BOARDING_PASS_PERSISTENCE = Path(__file__).parent / BOARDING_PASS_HEADERS
 CREDENTIALS = Path(__file__).parent / PERSISTENCE
+
+
+async def async_load_json_object(hass: HomeAssistant, path: Path) -> JsonObjectType:
+    return await hass.async_add_executor_job(load_json_object, path)
 
 
 def deviceInfo(name) -> DeviceInfo:
@@ -87,7 +92,7 @@ async def async_setup_platform(
     """Set up the sensor platform."""
     session = async_get_clientsession(hass)
 
-    data = load_json_object(CREDENTIALS)
+    data = await async_load_json_object(hass, CREDENTIALS)
 
     profileCoordinator = RyanairProfileCoordinator(
         hass, session, config[CONF_DEVICE_FINGERPRINT])
@@ -117,7 +122,8 @@ async def async_setup_platform(
     upcomingFlights = 0
     if "items" in flightsCoordinator.data and len(flightsCoordinator.data["items"]) > 0:
 
-        bookingReferences = load_json_object(BOARDING_PASS_PERSISTENCE)
+        bookingReferences = await async_load_json_object(
+            hass, BOARDING_PASS_PERSISTENCE)
         userBookings = []
         for item in flightsCoordinator.data["items"]:
 
@@ -377,26 +383,11 @@ class RyanairFlightSensor(CoordinatorEntity[RyanairFlightsCoordinator], SensorEn
 
                 now_utc = dt_util.utcnow().timestamp()
 
-                checkInOpenUTC = 0
-
-                if "checkInOpen" in self.flight:
-                    checkInOpenUTC = datetime.strptime(
+                checkInOpenUTC = datetime.strptime(
                     self.flight["checkInOpen"], "%Y-%m-%dT%H:%M:%SZ").timestamp()
 
-                if "checkInOpen" in self.checkInInfo:
-                    checkInOpenUTC = datetime.strptime(
-                    self.checkInInfo["checkInOpen"], "%Y-%m-%dT%H:%M:%SZ").timestamp()
-
-                checkInCloseUTC = 0
-
-                if "checkInClose" in self.flight:
-                    checkInCloseUTC = datetime.strptime(
+                checkInCloseUTC = datetime.strptime(
                     self.flight["checkInClose"], "%Y-%m-%dT%H:%M:%SZ").timestamp()
-
-                if "checkInClose" in self.checkInInfo:
-                    checkInCloseUTC = datetime.strptime(
-                    self.checkInInfo["checkInClose"], "%Y-%m-%dT%H:%M:%SZ").timestamp()
-
 
                 if now_utc < checkInOpenUTC:
                     state = "Check-in not open"

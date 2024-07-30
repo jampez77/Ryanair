@@ -9,8 +9,8 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.core import HomeAssistant
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
-from homeassistant.util.json import load_json_object
-from homeassistant.util.json import JsonObjectType
+from homeassistant.util.json import load_json_object, JsonObjectType
+from homeassistant.exceptions import HomeAssistantError
 from pathlib import Path
 from datetime import timedelta
 import os
@@ -40,6 +40,10 @@ SCAN_INTERVAL = timedelta(5)
 CREDENTIALS = Path(__file__).parent / PERSISTENCE
 
 
+async def async_load_json_object(hass: HomeAssistant, path: Path) -> JsonObjectType:
+    return await hass.async_add_executor_job(load_json_object, path)
+
+
 def deviceInfo(bookingRef) -> DeviceInfo:
     return DeviceInfo(
         identifiers={(DOMAIN, f"Ryanair_{bookingRef}")},
@@ -64,12 +68,12 @@ async def async_setup_platform(
     session = async_get_clientsession(hass)
 
     sensors = []
-    data = load_json_object(CREDENTIALS)
+    data = await async_load_json_object(hass, CREDENTIALS)
 
     deviceFingerprint = config[CONF_DEVICE_FINGERPRINT]
     customerId = config[CUSTOMER_ID]
 
-    bookingData = load_json_object(BOARDING_PASS_PERSISTENCE)
+    bookingData = await async_load_json_object(hass, BOARDING_PASS_PERSISTENCE)
     if deviceFingerprint in bookingData:
         for bookingData in bookingData[deviceFingerprint]:
 
@@ -97,37 +101,38 @@ async def async_setup_platform(
 
                 if boardPassCoordinator.data is not None:
                     for boardingPass in boardPassCoordinator.data:
-                        flightName = "(" + boardingPass["flight"]["label"] + ") " + \
-                            boardingPass["departure"]["name"] + \
-                            " - " + boardingPass["arrival"]["name"]
+                        if "flight" in boardingPass:
+                            flightName = "(" + boardingPass["flight"]["label"] + ") " + \
+                                boardingPass["departure"]["name"] + \
+                                " - " + boardingPass["arrival"]["name"]
 
-                        seat = boardingPass["seat"]["designator"]
+                            seat = boardingPass["seat"]["designator"]
 
-                        passenger = boardingPass["name"]["first"] + \
-                            " " + boardingPass["name"]["last"]
+                            passenger = boardingPass["name"]["first"] + \
+                                " " + boardingPass["name"]["last"]
 
-                        name = passenger + ": " + \
-                            flightName + "(" + seat + ")"
+                            name = passenger + ": " + \
+                                flightName + "(" + seat + ")"
 
-                        boardingPassDescription = ImageEntityDescription(
-                            key=f"Ryanair_boarding_pass{name}",
-                            name=name,
-                        )
+                            boardingPassDescription = ImageEntityDescription(
+                                key=f"Ryanair_boarding_pass{name}",
+                                name=name,
+                            )
 
-                        now_utc = dt_util.utcnow().timestamp()
+                            now_utc = dt_util.utcnow().timestamp()
 
-                        fileName = Path(__file__).parent / (BOARDING_PASSES_URI + "/" +
-                                                            getFileName(name + boardingPass["departure"]["dateUTC"]))
+                            fileName = Path(__file__).parent / (BOARDING_PASSES_URI + "/" +
+                                                                getFileName(name + boardingPass["departure"]["dateUTC"]))
 
-                        nextDay = (datetime.strptime(
-                            boardingPass["departure"]["dateUTC"], "%Y-%m-%dT%H:%M:%SZ") + dt.timedelta(days=1)).timestamp()
+                            nextDay = (datetime.strptime(
+                                boardingPass["departure"]["dateUTC"], "%Y-%m-%dT%H:%M:%SZ") + dt.timedelta(days=1)).timestamp()
 
-                        if now_utc > nextDay:
-                            if fileName and os.path.isfile(fileName):
-                                os.remove(fileName)
-                        else:
-                            sensors.append(RyanairBoardingPassImage(hass, boardPassCoordinator,
-                                                                    boardingPass, boardingPass["pnr"], name, boardingPassDescription))
+                            if now_utc > nextDay:
+                                if fileName and os.path.isfile(fileName):
+                                    os.remove(fileName)
+                            else:
+                                sensors.append(RyanairBoardingPassImage(hass, boardPassCoordinator,
+                                                                        boardingPass, boardingPass["pnr"], name, boardingPassDescription))
 
     async_add_entities(sensors, update_before_add=True)
 

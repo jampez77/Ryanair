@@ -3,10 +3,12 @@ from __future__ import annotations
 
 from homeassistant.helpers.typing import ConfigType
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 from .const import DOMAIN
 import homeassistant.helpers.config_validation as cv
+import asyncio
 
 PLATFORMS = [Platform.SENSOR, Platform.IMAGE]
 CONFIG_SCHEMA = cv.empty_config_schema(DOMAIN)
@@ -24,9 +26,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.data[DOMAIN][entry.entry_id] = hass_data
 
     # Forward the setup to the sensor platform.
-    await hass.config_entries.async_forward_entry_setups(
-        entry, PLATFORMS
-    )
+    try:
+        await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    except (asyncio.TimeoutError) as ex:
+        raise ConfigEntryNotReady(
+            f"Timeout while loading config entry for"
+        ) from ex
     return True
 
 

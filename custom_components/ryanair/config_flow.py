@@ -11,7 +11,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.const import CONF_EMAIL, CONF_PASSWORD
 from homeassistant.helpers.json import save_json
-from homeassistant.util.json import load_json_object
+from homeassistant.util.json import load_json_object, JsonObjectType
 from .const import (
     DOMAIN,
     CONF_DEVICE_FINGERPRINT,
@@ -41,6 +41,10 @@ STEP_MFA = vol.Schema(
         vol.Required(MFA_CODE): str,
     }
 )
+
+
+async def async_load_json_object(hass: HomeAssistant, path: Path) -> JsonObjectType:
+    return await hass.async_add_executor_job(load_json_object, path)
 
 
 async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str, Any]:
@@ -147,7 +151,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             else:
                 # if data is not null and contains MFA TOKEN then initiate MFA capture
                 if CUSTOMER_ID in info["data"]:
-                    users = load_json_object(CREDENTIALS)
+                    users = await async_load_json_object(self.hass, CREDENTIALS)
 
                     users[user_input[CONF_DEVICE_FINGERPRINT]
                           ][CONF_DEVICE_FINGERPRINT] = user_input[CONF_DEVICE_FINGERPRINT]
@@ -189,7 +193,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         user_input[CONF_DEVICE_FINGERPRINT] = self._fingerprint
 
-        users = load_json_object(CREDENTIALS)
+        users = await async_load_json_object(self.hass, CREDENTIALS)
         ryanairData = {
             CONF_EMAIL: user_input[CONF_EMAIL],
             CONF_PASSWORD: user_input[CONF_PASSWORD],
@@ -220,7 +224,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                             },
                         )
                     if CUSTOMER_ID in info["data"]:
-                        users = load_json_object(CREDENTIALS)
+                        users = await async_load_json_object(self.hass, CREDENTIALS)
 
                         users[user_input[CONF_DEVICE_FINGERPRINT]
                               ][CONF_DEVICE_FINGERPRINT] = user_input[CONF_DEVICE_FINGERPRINT]

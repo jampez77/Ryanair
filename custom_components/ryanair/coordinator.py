@@ -52,8 +52,8 @@ from .const import (
     CLIENT
 )
 from .errors import RyanairError, InvalidAuth, APIRatelimitExceeded, UnknownError
-from homeassistant.exceptions import ConfigEntryAuthFailed
-from homeassistant.util.json import load_json_object
+from homeassistant.exceptions import ConfigEntryAuthFailed, HomeAssistantError
+from homeassistant.util.json import load_json_object, JsonObjectType
 from homeassistant.helpers.json import save_json
 from pathlib import Path
 _LOGGER = logging.getLogger(__name__)
@@ -62,6 +62,10 @@ USER_PROFILE_URL = HOST + USER_PROFILE + V
 ORDERS_URL = HOST + ORDERS + V
 BOARDING_PASS_PERSISTENCE = Path(__file__).parent / BOARDING_PASS_HEADERS
 CREDENTIALS = Path(__file__).parent / PERSISTENCE
+
+
+async def async_load_json_object(hass: HomeAssistant, path: Path) -> JsonObjectType:
+    return await hass.async_add_executor_job(load_json_object, path)
 
 
 async def rememberMeToken(self, userData):
@@ -81,7 +85,7 @@ async def rememberMeToken(self, userData):
     )
     rememberMeTokenResponse = await rememberMeTokenResp.json()
 
-    users = load_json_object(CREDENTIALS)
+    users = await async_load_json_object(self.hass, CREDENTIALS)
 
     if rememberMeTokenResponse is not None and ((ACCESS_DENIED in rememberMeTokenResponse and rememberMeTokenResponse[CAUSE] == NOT_AUTHENTICATED) or (
         TYPE in rememberMeTokenResponse and rememberMeTokenResponse[TYPE] == CLIENT_ERROR
@@ -98,7 +102,7 @@ async def rememberMeToken(self, userData):
 
     save_json(CREDENTIALS, users)
 
-    return load_json_object(CREDENTIALS)
+    return await async_load_json_object(self.hass, CREDENTIALS)
 
 
 async def refreshToken(self, userData):
@@ -118,7 +122,7 @@ async def refreshToken(self, userData):
 
     save_json(CREDENTIALS, users)
 
-    return load_json_object(CREDENTIALS)
+    return await async_load_json_object(self.hass, CREDENTIALS)
 
 
 async def getFlights(self, data):
@@ -227,7 +231,7 @@ class RyanairBookingDetailsCoordinator(DataUpdateCoordinator):
     async def _async_update_data(self):
         """Fetch data from API endpoint."""
         try:
-            data = load_json_object(CREDENTIALS)
+            data = await async_load_json_object(self.hass, CREDENTIALS)
             userData = data[self.fingerprint]
             if X_REMEMBER_ME_TOKEN not in userData:
                 userData = await rememberMeToken(self, userData)
@@ -281,8 +285,9 @@ class RyanairBoardingPassCoordinator(DataUpdateCoordinator):
     async def _async_update_data(self):
         """Fetch data from API endpoint."""
         try:
-            boardingPassData = load_json_object(BOARDING_PASS_PERSISTENCE)
-            data = load_json_object(CREDENTIALS)
+            boardingPassData = await async_load_json_object(
+                self.hass, BOARDING_PASS_PERSISTENCE)
+            data = await async_load_json_object(self.hass, CREDENTIALS)
 
             if self.fingerprint in boardingPassData:
                 bookingReferences = boardingPassData[self.fingerprint]
@@ -294,7 +299,7 @@ class RyanairBoardingPassCoordinator(DataUpdateCoordinator):
                         RECORD_LOCATOR: bookingRef[BOOKING_REFERENCE]
                     }
 
-                    data = load_json_object(CREDENTIALS)
+                    data = await async_load_json_object(self.hass, CREDENTIALS)
                     userData = data[self.fingerprint]
                     if X_REMEMBER_ME_TOKEN not in userData:
                         userData = await rememberMeToken(self, userData)
@@ -311,7 +316,7 @@ class RyanairBoardingPassCoordinator(DataUpdateCoordinator):
 
                     if body is not None:
                         for boardingPass in body:
-                            try: 
+                            if "barcode" in boardingPass:
                                 aztec_code = AztecCode(boardingPass['barcode'])
 
                                 flightName = "(" + boardingPass["flight"]["label"] + ") " + \
@@ -331,8 +336,6 @@ class RyanairBoardingPassCoordinator(DataUpdateCoordinator):
 
                                 aztec_code.save(
                                     Path(__file__).parent / BOARDING_PASSES_URI / fileName, module_size=16)
-                            except:
-                                print("Unable to parse barcode")
             else:
                 body = None
 
@@ -375,7 +378,7 @@ class RyanairFlightsCoordinator(DataUpdateCoordinator):
     async def _async_update_data(self):
         """Fetch data from API endpoint."""
         try:
-            data = load_json_object(CREDENTIALS)
+            data = await async_load_json_object(self.hass, CREDENTIALS)
             userData = data[self.fingerprint]
             if X_REMEMBER_ME_TOKEN not in userData:
                 userData = await rememberMeToken(self, userData)
@@ -429,20 +432,21 @@ class RyanairProfileCoordinator(DataUpdateCoordinator):
     async def _async_update_data(self):
         """Fetch data from API endpoint."""
         try:
-            data = load_json_object(CREDENTIALS)
-            userData = data[self.fingerprint]
-            if X_REMEMBER_ME_TOKEN not in userData:
-                userData = await rememberMeToken(self, userData)
-                userData = userData[self.fingerprint]
+            data = await async_load_json_object(self.hass, CREDENTIALS)
+            if self.fingerprint in data:
+                userData = data[self.fingerprint]
+                if X_REMEMBER_ME_TOKEN not in userData:
+                    userData = await rememberMeToken(self, userData)
+                    userData = userData[self.fingerprint]
 
-            body = await getUserProfile(self, userData)
+                body = await getUserProfile(self, userData)
 
-            if (ACCESS_DENIED in body and body[CAUSE] == NOT_AUTHENTICATED) or (
-                TYPE in body and body[TYPE] == CLIENT_ERROR
-            ):
-                userData = await refreshToken(self, userData)
+                if (ACCESS_DENIED in body and body[CAUSE] == NOT_AUTHENTICATED) or (
+                    TYPE in body and body[TYPE] == CLIENT_ERROR
+                ):
+                    userData = await refreshToken(self, userData)
 
-                body = await getUserProfile(self, userData[self.fingerprint])
+                    body = await getUserProfile(self, userData[self.fingerprint])
 
         except InvalidAuth as err:
             raise ConfigEntryAuthFailed from err

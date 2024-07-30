@@ -26,7 +26,7 @@ This project is very much a work in progress and there are still many issues tha
 
 Enjoying this? Help me out with a :beers: or :coffee:!
 
-[![coffee](https://www.buymeacoffee.com/assets/img/custom_images/black_img.png)](https://www.buymeacoffee.com/jampez77)
+[![coffee](https://www.buymeacoffee.com/assets/img/custom_images/black_img.png)](https://www.buymeacoffee.com/whenitworks)
 
 
 ## Installation through [HACS](https://hacs.xyz/)
