@@ -15,7 +15,6 @@ This component will allow you to bring your upcoming Ryanair flight information 
 
 This project is very much a work in progress and there are still many issues that need addressing. If you have the skills, time and implication then please feel free to contribute.
 
-
 ---
 
 [![GitHub Release][releases-shield]][releases]

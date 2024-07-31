@@ -377,7 +377,7 @@ class RyanairFlightSensor(CoordinatorEntity[RyanairFlightsCoordinator], SensorEn
         """
         try:
 
-            if self.checkInComplete == True:
+            if self.checkInComplete:
                 state = "Checked-in"
             else:
 

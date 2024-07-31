@@ -75,10 +75,10 @@ async def async_setup_platform(
 
     bookingData = await async_load_json_object(hass, BOARDING_PASS_PERSISTENCE)
     if deviceFingerprint in bookingData:
-        for bookingData in bookingData[deviceFingerprint]:
+        for booking in bookingData[deviceFingerprint]:
 
             bookingInfo = {
-                BOOKING_ID: bookingData[BOOKING_ID],
+                BOOKING_ID: booking[BOOKING_ID],
                 SURROGATE_ID: customerId
             }
 
@@ -201,8 +201,6 @@ class RyanairBoardingPassImage(CoordinatorEntity[RyanairBoardingPassCoordinator]
     async def async_image(self) -> bytes | None:
         """Return bytes of image."""
 
-        image_path = Path(__file__).parent / self.file_name
-
         qr_bytes = await self._fetch_image()
 
         if self._current_qr_bytes != qr_bytes:
@@ -212,7 +210,7 @@ class RyanairBoardingPassImage(CoordinatorEntity[RyanairBoardingPassCoordinator]
             self._current_qr_bytes = qr_bytes
             self.async_write_ha_state()
 
-        return await self.hass.async_add_executor_job(image_path.read_bytes)
+        return qr_bytes
 
     @property
     def icon(self) -> str:

@@ -7,6 +7,7 @@ from homeassistant.helpers.update_coordinator import (
     DataUpdateCoordinator,
     UpdateFailed,
 )
+from aiohttp import ClientSession, ClientError
 import re
 from aztec_code_generator import AztecCode
 from .const import (
@@ -70,39 +71,43 @@ async def async_load_json_object(hass: HomeAssistant, path: Path) -> JsonObjectT
 
 async def rememberMeToken(self, userData):
 
-    rememberMeTokenResp = await self.session.request(
-        method="GET",
-        url=USER_PROFILE_URL
-        + ACCOUNTS
-        + "/"
-        + userData[CUSTOMER_ID]
-        + "/"
-        + REMEMBER_ME_TOKEN,
-        headers={
-            CONF_DEVICE_FINGERPRINT: userData[CONF_DEVICE_FINGERPRINT],
-            CONF_AUTH_TOKEN: userData[TOKEN],
-        },
-    )
-    rememberMeTokenResponse = await rememberMeTokenResp.json()
+    async with ClientSession() as session:
+        rememberMeTokenResp = await session.request(
+            method="GET",
+            url=USER_PROFILE_URL
+            + ACCOUNTS
+            + "/"
+            + userData[CUSTOMER_ID]
+            + "/"
+            + REMEMBER_ME_TOKEN,
+            headers={
+                CONF_DEVICE_FINGERPRINT: userData[CONF_DEVICE_FINGERPRINT],
+                CONF_AUTH_TOKEN: userData[TOKEN],
+            },
+        )
+        rememberMeTokenResponse = await rememberMeTokenResp.json()
 
-    users = await async_load_json_object(self.hass, CREDENTIALS)
+        users = await async_load_json_object(self.hass, CREDENTIALS)
 
-    if rememberMeTokenResponse is not None and ((ACCESS_DENIED in rememberMeTokenResponse and rememberMeTokenResponse[CAUSE] == NOT_AUTHENTICATED) or (
-        TYPE in rememberMeTokenResponse and rememberMeTokenResponse[TYPE] == CLIENT_ERROR
-    )):
-        authResponse = await authenticateUser(self, userData)
+        if rememberMeTokenResponse is not None and ((ACCESS_DENIED in rememberMeTokenResponse and rememberMeTokenResponse[CAUSE] == NOT_AUTHENTICATED) or (
+            TYPE in rememberMeTokenResponse and rememberMeTokenResponse[TYPE] == CLIENT_ERROR
+        )):
+            authResponse = await authenticateUser(self, userData)
 
-        users[userData[CONF_DEVICE_FINGERPRINT]
-              ][TOKEN] = authResponse[TOKEN]
-        users[userData[CONF_DEVICE_FINGERPRINT]
-              ][CUSTOMER_ID] = authResponse[CUSTOMER_ID]
-    else:
-        users[userData[CONF_DEVICE_FINGERPRINT]
-              ][X_REMEMBER_ME_TOKEN] = rememberMeTokenResponse[TOKEN]
+            users[userData[CONF_DEVICE_FINGERPRINT]
+                  ][TOKEN] = authResponse[TOKEN]
+            users[userData[CONF_DEVICE_FINGERPRINT]
+                  ][CUSTOMER_ID] = authResponse[CUSTOMER_ID]
+        else:
+            users[userData[CONF_DEVICE_FINGERPRINT]
+                  ][X_REMEMBER_ME_TOKEN] = rememberMeTokenResponse[TOKEN]
 
-    save_json(CREDENTIALS, users)
+        save_json(CREDENTIALS, users)
 
-    return await async_load_json_object(self.hass, CREDENTIALS)
+        del rememberMeTokenResponse
+        del users
+
+        return await async_load_json_object(self.hass, CREDENTIALS)
 
 
 async def refreshToken(self, userData):
@@ -126,16 +131,26 @@ async def refreshToken(self, userData):
 
 
 async def getFlights(self, data):
-    resp = await self.session.request(
-        method="GET",
-        url=ORDERS_URL + ORDERS + data[CUSTOMER_ID] + "/" + DETAILS,
-        headers={
-            "Content-Type": CONTENT_TYPE_JSON,
-            CONF_DEVICE_FINGERPRINT: data[CONF_DEVICE_FINGERPRINT],
-            CONF_AUTH_TOKEN: data[TOKEN],
-        },
-    )
-    body = await resp.json()
+    body = None
+    async with ClientSession() as session:
+        try:
+            resp = await session.request(
+                method="GET",
+                url=ORDERS_URL + ORDERS + data[CUSTOMER_ID] + "/" + DETAILS,
+                headers={
+                    "Content-Type": CONTENT_TYPE_JSON,
+                    CONF_DEVICE_FINGERPRINT: data[CONF_DEVICE_FINGERPRINT],
+                    CONF_AUTH_TOKEN: data[TOKEN],
+                },
+            )
+            body = await resp.json()
+            # Process body if needed
+        except ClientError as e:
+            _LOGGER.error(f"Error fetching flights: {e}")
+            raise UpdateFailed(f"Error fetching flights: {e}")
+        finally:
+            del resp
+
     return body
 
 
@@ -246,6 +261,7 @@ class RyanairBookingDetailsCoordinator(DataUpdateCoordinator):
 
                 body = await getBookingDetails(self, userData[self.fingerprint], self.bookingInfo)
 
+            return body
         except InvalidAuth as err:
             raise ConfigEntryAuthFailed from err
         except RyanairError as err:
@@ -260,8 +276,8 @@ class RyanairBookingDetailsCoordinator(DataUpdateCoordinator):
 
             _LOGGER.exception("Unexpected exception")
             raise UnknownError from err
-
-        return body
+        except ClientError as error:
+            raise UpdateFailed(f"Error communicating with API: {error}")
 
 
 class RyanairBoardingPassCoordinator(DataUpdateCoordinator):
@@ -339,6 +355,7 @@ class RyanairBoardingPassCoordinator(DataUpdateCoordinator):
             else:
                 body = None
 
+            return body
         except InvalidAuth as err:
             raise ConfigEntryAuthFailed from err
         except RyanairError as err:
@@ -353,8 +370,8 @@ class RyanairBoardingPassCoordinator(DataUpdateCoordinator):
 
             _LOGGER.exception("Unexpected exception")
             raise UnknownError from err
-
-        return body
+        except ClientError as error:
+            raise UpdateFailed(f"Error communicating with API: {error}")
 
 
 class RyanairFlightsCoordinator(DataUpdateCoordinator):
@@ -448,6 +465,8 @@ class RyanairProfileCoordinator(DataUpdateCoordinator):
 
                     body = await getUserProfile(self, userData[self.fingerprint])
 
+                return body
+
         except InvalidAuth as err:
             raise ConfigEntryAuthFailed from err
         except RyanairError as err:
@@ -462,8 +481,8 @@ class RyanairProfileCoordinator(DataUpdateCoordinator):
 
             _LOGGER.exception("Unexpected exception")
             raise UnknownError from err
-
-        return body
+        except ClientError as error:
+            raise UpdateFailed(f"Error communicating with API: {error}")
 
 
 class RyanairMfaCoordinator(DataUpdateCoordinator):
@@ -498,7 +517,7 @@ class RyanairMfaCoordinator(DataUpdateCoordinator):
                 },
                 json={MFA_CODE: self.mfaCode, MFA_TOKEN: self.mfaToken},
             )
-            body = await resp.json()
+            return await resp.json()
             # session expired
             # {'access-denied': True, 'message': 'Full authentication is required to access this resource.', 'cause': 'NOT AUTHENTICATED'}
 
@@ -516,8 +535,8 @@ class RyanairMfaCoordinator(DataUpdateCoordinator):
 
             _LOGGER.exception("Unexpected exception")
             raise UnknownError from err
-
-        return body
+        except ClientError as error:
+            raise UpdateFailed(f"Error communicating with API: {error}")
 
 
 class RyanairCoordinator(DataUpdateCoordinator):
