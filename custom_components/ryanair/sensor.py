@@ -5,27 +5,25 @@ from aiohttp import ClientError
 from homeassistant.core import HomeAssistant, callback
 from typing import Any
 from homeassistant.helpers.typing import ConfigType, DiscoveryInfoType
+from homeassistant.const import CONF_EMAIL
 from .const import (
     DOMAIN,
     CUSTOMER_ID,
+    CUSTOMERS,
     ACCESS_DENIED,
     CAUSE,
-    BOARDING_PASS_HEADERS,
-    BOOKING_REFERENCES,
     BOOKING_REFERENCE,
     BOOKING_ID,
-    EMAIL,
     TYPE,
     PRODUCT_ID,
     CONF_DEVICE_FINGERPRINT,
-    PERSISTENCE
 )
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
-from homeassistant.exceptions import HomeAssistantError
-from homeassistant.util.json import load_json_object, JsonObjectType
-from homeassistant.helpers.json import save_json
+import uuid
+import hashlib
+from homeassistant.util.json import JsonObjectType
 from homeassistant.config_entries import ConfigEntry
 
 from homeassistant.components.sensor import (
@@ -35,7 +33,6 @@ from homeassistant.components.sensor import (
 from homeassistant.helpers.update_coordinator import (
     CoordinatorEntity,
 )
-from pathlib import Path
 from homeassistant.util import dt as dt_util
 from datetime import datetime
 from .coordinator import RyanairProfileCoordinator, RyanairFlightsCoordinator
@@ -43,19 +40,12 @@ from .coordinator import RyanairProfileCoordinator, RyanairFlightsCoordinator
 _LOGGER = logging.getLogger(__name__)
 # Time between updating data from GitHub
 SCAN_INTERVAL = timedelta(minutes=5)
-BOARDING_PASS_PERSISTENCE = Path(__file__).parent / BOARDING_PASS_HEADERS
-CREDENTIALS = Path(__file__).parent / PERSISTENCE
-
-
-async def async_load_json_object(hass: HomeAssistant, path: Path) -> JsonObjectType:
-    return await hass.async_add_executor_job(load_json_object, path)
 
 
 def deviceInfo(name) -> DeviceInfo:
     return DeviceInfo(
         identifiers={(DOMAIN, f"Ryanair_{name}")},
-        manufacturer="Jamie Nandhra-Pezone",
-        model="Ryanair",
+        manufacturer="Ryanair",
         name=name,
         configuration_url="https://github.com/jampez77/Ryanair/",
     )
@@ -69,6 +59,11 @@ def getProfileName(coordinator) -> str:
         if "lastName" in coordinator.data:
             name = name + " " + coordinator.data["lastName"]
     return name
+
+
+def generate_device_fingerprint(email: str) -> str:
+    unique_id = hashlib.md5(email.encode("UTF-8")).hexdigest()
+    return str(uuid.UUID(hex=unique_id))
 
 
 async def async_setup_entry(
@@ -92,14 +87,14 @@ async def async_setup_platform(
     """Set up the sensor platform."""
     session = async_get_clientsession(hass)
 
-    data = await async_load_json_object(hass, CREDENTIALS)
+    deviceFingerprint = generate_device_fingerprint(config[CONF_EMAIL])
 
     profileCoordinator = RyanairProfileCoordinator(
-        hass, session, config[CONF_DEVICE_FINGERPRINT])
+        hass, session, config, deviceFingerprint)
 
     await profileCoordinator.async_config_entry_first_refresh()
 
-    name = config[CUSTOMER_ID]
+    name = config[CUSTOMERS][deviceFingerprint][CUSTOMER_ID]
 
     profileDescription = SensorEntityDescription(
         key=f"Ryanair_{name}",
@@ -107,11 +102,9 @@ async def async_setup_platform(
     )
 
     flightsCoordinator = RyanairFlightsCoordinator(
-        hass, session, config[CONF_DEVICE_FINGERPRINT])
+        hass, session, config, deviceFingerprint)
 
     await flightsCoordinator.async_config_entry_first_refresh()
-
-    name = config[CUSTOMER_ID]
 
     sensors = []
 
@@ -122,8 +115,7 @@ async def async_setup_platform(
     upcomingFlights = 0
     if "items" in flightsCoordinator.data and len(flightsCoordinator.data["items"]) > 0:
 
-        bookingReferences = await async_load_json_object(
-            hass, BOARDING_PASS_PERSISTENCE)
+        bookingReferences = {}
         userBookings = []
         for item in flightsCoordinator.data["items"]:
 
@@ -224,7 +216,6 @@ async def async_setup_platform(
                             flightsCoordinator, bookingRef, checkInInfo, flight, flightDescription))
 
         bookingReferences[config[CONF_DEVICE_FINGERPRINT]] = userBookings
-        save_json(BOARDING_PASS_PERSISTENCE, bookingReferences)
 
     flightCountDescription = SensorEntityDescription(
         key=f"Ryanair_flight-count{name}",
@@ -249,9 +240,8 @@ class RyanairFlightCountSensor(SensorEntity):
     ) -> None:
         """Initialize."""
         self._name = "Upcoming Flights"
-        self._attr_device_info = self._attr_device_info = deviceInfo(name)
-        self._attr_unique_id = f"Ryanair_flight-count-{name}-{description.key}".lower(
-        )
+        self._attr_device_info = deviceInfo(name)
+        self._attr_unique_id = f"{DOMAIN}-{name}-{description.key}".lower()
         self._attrs: dict[str, Any] = {}
         self.entity_description = description
         self._state = upcomingFlights

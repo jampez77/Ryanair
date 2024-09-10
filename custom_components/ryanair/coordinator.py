@@ -30,7 +30,6 @@ from .const import (
     TOKEN,
     REMEMBER_ME_TOKEN,
     DETAILS,
-    PERSISTENCE,
     REMEMBER_ME,
     X_REMEMBER_ME_TOKEN,
     ACCESS_DENIED,
@@ -41,28 +40,22 @@ from .const import (
     BOARDING_PASS_URL,
     BOARDING_PASSES_URI,
     BOOKING_REFERENCE,
-    BOARDING_PASS_HEADERS,
     EMAIL,
     RECORD_LOCATOR,
     BOOKING_DETAILS_URL,
     AUTH_TOKEN,
     BOOKING_INFO,
-    BOOKING_ID,
-    SURROGATE_ID,
+    DOMAIN,
     CLIENT_VERSION,
-    CLIENT
 )
 from .errors import RyanairError, InvalidAuth, APIRatelimitExceeded, UnknownError
-from homeassistant.exceptions import ConfigEntryAuthFailed, HomeAssistantError
+from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.util.json import load_json_object, JsonObjectType
-from homeassistant.helpers.json import save_json
 from pathlib import Path
 _LOGGER = logging.getLogger(__name__)
 
 USER_PROFILE_URL = HOST + USER_PROFILE + V
 ORDERS_URL = HOST + ORDERS + V
-BOARDING_PASS_PERSISTENCE = Path(__file__).parent / BOARDING_PASS_HEADERS
-CREDENTIALS = Path(__file__).parent / PERSISTENCE
 
 
 async def async_load_json_object(hass: HomeAssistant, path: Path) -> JsonObjectType:
@@ -87,27 +80,26 @@ async def rememberMeToken(self, userData):
         )
         rememberMeTokenResponse = await rememberMeTokenResp.json()
 
-        users = await async_load_json_object(self.hass, CREDENTIALS)
-
         if rememberMeTokenResponse is not None and ((ACCESS_DENIED in rememberMeTokenResponse and rememberMeTokenResponse[CAUSE] == NOT_AUTHENTICATED) or (
             TYPE in rememberMeTokenResponse and rememberMeTokenResponse[TYPE] == CLIENT_ERROR
         )):
             authResponse = await authenticateUser(self, userData)
 
-            users[userData[CONF_DEVICE_FINGERPRINT]
-                  ][TOKEN] = authResponse[TOKEN]
-            users[userData[CONF_DEVICE_FINGERPRINT]
-                  ][CUSTOMER_ID] = authResponse[CUSTOMER_ID]
+            userData[TOKEN] = authResponse[TOKEN]
+            userData[CUSTOMER_ID] = authResponse[CUSTOMER_ID]
         else:
-            users[userData[CONF_DEVICE_FINGERPRINT]
-                  ][X_REMEMBER_ME_TOKEN] = rememberMeTokenResponse[TOKEN]
+            userData[X_REMEMBER_ME_TOKEN] = rememberMeTokenResponse[TOKEN]
 
-        save_json(CREDENTIALS, users)
+            entries = self.hass.config_entries.async_entries(DOMAIN)
+            for entry in entries:
+                updated_data = entry.data.copy()
+                updated_data.update(self.data)
+                self.hass.config_entries.async_update_entry(
+                    entry, data=updated_data)
 
         del rememberMeTokenResponse
-        del users
 
-        return await async_load_json_object(self.hass, CREDENTIALS)
+        return userData
 
 
 async def refreshToken(self, userData):
@@ -123,11 +115,16 @@ async def refreshToken(self, userData):
 
     users = await rememberMeToken(self, userData)
 
-    users[userData[CONF_DEVICE_FINGERPRINT]][TOKEN] = rememberMeResponse[TOKEN]
+    users[TOKEN] = rememberMeResponse[TOKEN]
 
-    save_json(CREDENTIALS, users)
+    entries = self.hass.config_entries.async_entries(DOMAIN)
+    for entry in entries:
+        updated_data = entry.data.copy()
+        updated_data.update(self.data)
+        self.hass.config_entries.async_update_entry(
+            entry, data=updated_data)
 
-    return await async_load_json_object(self.hass, CREDENTIALS)
+    return users
 
 
 async def getFlights(self, data):
@@ -206,13 +203,13 @@ async def getBookingDetails(self, data, bookingInfo):
     return body
 
 
-async def authenticateUser(self, userData):
+async def authenticateUser(self, userData, fingerprint):
     resp = await self.session.request(
         method="POST",
         url=USER_PROFILE_URL + ACCOUNT_LOGIN,
         headers={
             "Content-Type": CONTENT_TYPE_JSON,
-            CONF_DEVICE_FINGERPRINT: userData[CONF_DEVICE_FINGERPRINT],
+            CONF_DEVICE_FINGERPRINT: fingerprint,
         },
         json={
             CONF_EMAIL: userData[CONF_EMAIL],
@@ -227,7 +224,7 @@ async def authenticateUser(self, userData):
 class RyanairBookingDetailsCoordinator(DataUpdateCoordinator):
     """Booking Details Coordinator"""
 
-    def __init__(self, hass: HomeAssistant, session, deviceFingerprint, bookingInfo) -> None:
+    def __init__(self, hass: HomeAssistant, session, deviceFingerprint, data) -> None:
         """Initialize coordinator."""
 
         super().__init__(
@@ -240,26 +237,23 @@ class RyanairBookingDetailsCoordinator(DataUpdateCoordinator):
         )
         self.hass = hass
         self.session = session
-        self.bookingInfo = bookingInfo
+        self.data = data
         self.fingerprint = deviceFingerprint
 
     async def _async_update_data(self):
         """Fetch data from API endpoint."""
         try:
-            data = await async_load_json_object(self.hass, CREDENTIALS)
-            userData = data[self.fingerprint]
-            if X_REMEMBER_ME_TOKEN not in userData:
-                userData = await rememberMeToken(self, userData)
-                userData = userData[self.fingerprint]
+            if X_REMEMBER_ME_TOKEN not in self.data:
+                self.data = await rememberMeToken(self, self.data)
 
-            body = await getBookingDetails(self, userData, self.bookingInfo)
+            body = await getBookingDetails(self, self.data)
 
             if (ACCESS_DENIED in body and body[CAUSE] == NOT_AUTHENTICATED) or (
                 TYPE in body and body[TYPE] == CLIENT_ERROR
             ):
-                userData = await refreshToken(self, userData)
+                self.data = await refreshToken(self, self.data)
 
-                body = await getBookingDetails(self, userData[self.fingerprint], self.bookingInfo)
+                body = await getBookingDetails(self, self.data)
 
             return body
         except InvalidAuth as err:
@@ -297,13 +291,13 @@ class RyanairBoardingPassCoordinator(DataUpdateCoordinator):
         self.session = session
         self.email = data[EMAIL]
         self.fingerprint = data[CONF_DEVICE_FINGERPRINT]
+        self.data = data
 
     async def _async_update_data(self):
         """Fetch data from API endpoint."""
         try:
             boardingPassData = await async_load_json_object(
-                self.hass, BOARDING_PASS_PERSISTENCE)
-            data = await async_load_json_object(self.hass, CREDENTIALS)
+                self.hass, "")
 
             if self.fingerprint in boardingPassData:
                 bookingReferences = boardingPassData[self.fingerprint]
@@ -315,20 +309,17 @@ class RyanairBoardingPassCoordinator(DataUpdateCoordinator):
                         RECORD_LOCATOR: bookingRef[BOOKING_REFERENCE]
                     }
 
-                    data = await async_load_json_object(self.hass, CREDENTIALS)
-                    userData = data[self.fingerprint]
-                    if X_REMEMBER_ME_TOKEN not in userData:
-                        userData = await rememberMeToken(self, userData)
-                        userData = userData[self.fingerprint]
+                    if X_REMEMBER_ME_TOKEN not in self.data:
+                        self.data = await rememberMeToken(self, self.data)
 
-                    body = await getBoardingPasses(self, userData, headers)
+                    body = await getBoardingPasses(self, self.data, headers)
 
                     if body is not None and ((ACCESS_DENIED in body and body[CAUSE] == NOT_AUTHENTICATED) or (
                         TYPE in body and body[TYPE] == CLIENT_ERROR
                     )):
-                        userData = await refreshToken(self, userData)
+                        self.data = await refreshToken(self, self.data)
 
-                        body = await getBoardingPasses(self, userData[self.fingerprint], headers)
+                        body = await getBoardingPasses(self, self.data, headers)
 
                     if body is not None:
                         for boardingPass in body:
@@ -377,7 +368,7 @@ class RyanairBoardingPassCoordinator(DataUpdateCoordinator):
 class RyanairFlightsCoordinator(DataUpdateCoordinator):
     """Flights Coordinator"""
 
-    def __init__(self, hass: HomeAssistant, session, fingerprint) -> None:
+    def __init__(self, hass: HomeAssistant, session, data, fingerprint) -> None:
         """Initialize coordinator."""
 
         super().__init__(
@@ -390,25 +381,24 @@ class RyanairFlightsCoordinator(DataUpdateCoordinator):
         )
         self.hass = hass
         self.session = session
+        self.data = data[CUSTOMERS][fingerprint]
         self.fingerprint = fingerprint
 
     async def _async_update_data(self):
         """Fetch data from API endpoint."""
         try:
-            data = await async_load_json_object(self.hass, CREDENTIALS)
-            userData = data[self.fingerprint]
-            if X_REMEMBER_ME_TOKEN not in userData:
-                userData = await rememberMeToken(self, userData)
-                userData = userData[self.fingerprint]
 
-            body = await getFlights(self, userData)
+            if X_REMEMBER_ME_TOKEN not in self.data:
+                self.data = await rememberMeToken(self, self.data)
+
+            body = await getFlights(self, self.data)
 
             if (ACCESS_DENIED in body and body[CAUSE] == NOT_AUTHENTICATED) or (
                 TYPE in body and body[TYPE] == CLIENT_ERROR
             ):
-                userData = await refreshToken(self, userData)
+                self.data = await refreshToken(self, self.data)
 
-                body = await getFlights(self, userData[self.fingerprint])
+                body = await getFlights(self, self.data)
 
         except InvalidAuth as err:
             raise ConfigEntryAuthFailed from err
@@ -431,7 +421,7 @@ class RyanairFlightsCoordinator(DataUpdateCoordinator):
 class RyanairProfileCoordinator(DataUpdateCoordinator):
     """User Profile Coordinator"""
 
-    def __init__(self, hass: HomeAssistant, session, fingerprint) -> None:
+    def __init__(self, hass: HomeAssistant, session, data, fingerprint) -> None:
         """Initialize coordinator."""
 
         super().__init__(
@@ -442,28 +432,27 @@ class RyanairProfileCoordinator(DataUpdateCoordinator):
             # Polling interval. Will only be polled if there are subscribers.
             update_interval=timedelta(minutes=5),
         )
-
         self.session = session
+        self.data = data[CUSTOMERS][fingerprint]
         self.fingerprint = fingerprint
 
     async def _async_update_data(self):
         """Fetch data from API endpoint."""
         try:
-            data = await async_load_json_object(self.hass, CREDENTIALS)
-            if self.fingerprint in data:
-                userData = data[self.fingerprint]
-                if X_REMEMBER_ME_TOKEN not in userData:
-                    userData = await rememberMeToken(self, userData)
-                    userData = userData[self.fingerprint]
 
-                body = await getUserProfile(self, userData)
+            if CONF_DEVICE_FINGERPRINT in self.data:
+
+                if X_REMEMBER_ME_TOKEN not in self.data:
+                    self.data = await rememberMeToken(self, self.data)
+
+                body = await getUserProfile(self, self.data)
 
                 if (ACCESS_DENIED in body and body[CAUSE] == NOT_AUTHENTICATED) or (
                     TYPE in body and body[TYPE] == CLIENT_ERROR
                 ):
-                    userData = await refreshToken(self, userData)
+                    self.data = await refreshToken(self, self.data)
 
-                    body = await getUserProfile(self, userData[self.fingerprint])
+                    body = await getUserProfile(self, self.data)
 
                 return body
 
@@ -542,7 +531,7 @@ class RyanairMfaCoordinator(DataUpdateCoordinator):
 class RyanairCoordinator(DataUpdateCoordinator):
     """Data coordinator."""
 
-    def __init__(self, hass: HomeAssistant, session, userData) -> None:
+    def __init__(self, hass: HomeAssistant, session, userData, fingerprint) -> None:
         """Initialize coordinator."""
 
         super().__init__(
@@ -553,7 +542,7 @@ class RyanairCoordinator(DataUpdateCoordinator):
             # Polling interval. Will only be polled if there are subscribers.
             update_interval=timedelta(5),
         )
-
+        self.fingerprint = fingerprint
         self.session = session
         self.userData = userData
 
@@ -564,7 +553,7 @@ class RyanairCoordinator(DataUpdateCoordinator):
         so entities can quickly look up their data.
         """
         try:
-            body = await authenticateUser(self, self.userData)
+            body = await authenticateUser(self, self.userData, self.fingerprint)
         except InvalidAuth as err:
             raise ConfigEntryAuthFailed from err
         except RyanairError as err:

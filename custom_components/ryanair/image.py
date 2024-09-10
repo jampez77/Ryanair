@@ -9,22 +9,23 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.core import HomeAssistant
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
-from homeassistant.util.json import load_json_object, JsonObjectType
-from homeassistant.exceptions import HomeAssistantError
+from homeassistant.util.json import JsonObjectType
+import uuid
+import hashlib
 from pathlib import Path
 from datetime import timedelta
 import os
 from datetime import datetime
+from homeassistant.const import CONF_EMAIL, CONF_PASSWORD
 from .const import (
     DOMAIN,
-    BOARDING_PASS_HEADERS,
     BOARDING_PASSES_URI,
-    PERSISTENCE,
     CONF_DEVICE_FINGERPRINT,
     CUSTOMER_ID,
     BOOKING_ID,
     SURROGATE_ID,
-    EMAIL
+    EMAIL,
+    CUSTOMERS
 )
 from typing import Any
 import re
@@ -35,23 +36,21 @@ from homeassistant.components.image import (
 from homeassistant.helpers.update_coordinator import (
     CoordinatorEntity,
 )
-BOARDING_PASS_PERSISTENCE = Path(__file__).parent / BOARDING_PASS_HEADERS
 SCAN_INTERVAL = timedelta(5)
-CREDENTIALS = Path(__file__).parent / PERSISTENCE
-
-
-async def async_load_json_object(hass: HomeAssistant, path: Path) -> JsonObjectType:
-    return await hass.async_add_executor_job(load_json_object, path)
 
 
 def deviceInfo(bookingRef) -> DeviceInfo:
     return DeviceInfo(
         identifiers={(DOMAIN, f"Ryanair_{bookingRef}")},
-        manufacturer="Jamie Nandhra-Pezone",
-        model="Ryanair",
+        manufacturer="Ryanair",
         name=bookingRef,
         configuration_url="https://github.com/jampez77/Ryanair/",
     )
+
+
+def generate_device_fingerprint(email: str) -> str:
+    unique_id = hashlib.md5(email.encode("UTF-8")).hexdigest()
+    return str(uuid.UUID(hex=unique_id))
 
 
 def getFileName(name) -> str:
@@ -68,12 +67,11 @@ async def async_setup_platform(
     session = async_get_clientsession(hass)
 
     sensors = []
-    data = await async_load_json_object(hass, CREDENTIALS)
 
-    deviceFingerprint = config[CONF_DEVICE_FINGERPRINT]
-    customerId = config[CUSTOMER_ID]
+    deviceFingerprint = generate_device_fingerprint(config[CONF_EMAIL])
+    customerId = config[CUSTOMERS][deviceFingerprint][CUSTOMER_ID]
 
-    bookingData = await async_load_json_object(hass, BOARDING_PASS_PERSISTENCE)
+    bookingData = {}
     if deviceFingerprint in bookingData:
         for booking in bookingData[deviceFingerprint]:
 

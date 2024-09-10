@@ -9,6 +9,7 @@ from homeassistant.core import HomeAssistant
 from .const import DOMAIN
 import homeassistant.helpers.config_validation as cv
 import asyncio
+from homeassistant.config_entries import ConfigEntryState
 
 PLATFORMS = [Platform.SENSOR, Platform.IMAGE]
 CONFIG_SCHEMA = cv.empty_config_schema(DOMAIN)
@@ -37,7 +38,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 async def options_update_listener(hass: HomeAssistant, config_entry: ConfigEntry):
     """Handle options update."""
-    await hass.config_entries.async_reload(config_entry.entry_id)
+    if config_entry.state == ConfigEntryState.LOADED:
+        await hass.config_entries.async_reload(config_entry.entry_id)
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:

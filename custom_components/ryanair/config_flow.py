@@ -4,14 +4,11 @@ from __future__ import annotations
 from typing import Any
 import uuid
 import hashlib
-from pathlib import Path
 import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.const import CONF_EMAIL, CONF_PASSWORD
-from homeassistant.helpers.json import save_json
-from homeassistant.util.json import load_json_object, JsonObjectType
 from .const import (
     DOMAIN,
     CONF_DEVICE_FINGERPRINT,
@@ -22,13 +19,12 @@ from .const import (
     MFA_TOKEN,
     MFA_CODE,
     CODE_MFA_CODE_WRONG,
-    PERSISTENCE
+    CUSTOMERS,
 )
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from .coordinator import RyanairCoordinator, RyanairMfaCoordinator
 from .errors import CannotConnect
 
-CREDENTIALS = Path(__file__).parent / PERSISTENCE
 
 STEP_USER_DATA_SCHEMA = vol.Schema(
     {
@@ -43,14 +39,15 @@ STEP_MFA = vol.Schema(
 )
 
 
-async def async_load_json_object(hass: HomeAssistant, path: Path) -> JsonObjectType:
-    return await hass.async_add_executor_job(load_json_object, path)
+def generate_device_fingerprint(email: str) -> str:
+    unique_id = hashlib.md5(email.encode("UTF-8")).hexdigest()
+    return str(uuid.UUID(hex=unique_id))
 
 
-async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str, Any]:
+async def validate_input(hass: HomeAssistant, data: dict[str, Any], fingerprint: str) -> dict[str, Any]:
     """Validate the user input allows us to connect."""
     session = async_get_clientsession(hass)
-    coordinator = RyanairCoordinator(hass, session, data)
+    coordinator = RyanairCoordinator(hass, session, data, fingerprint)
 
     await coordinator.async_refresh()
 
@@ -122,12 +119,10 @@ async def validate_mfa_input(
 class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Ryanair."""
 
-    VERSION = 1
+    VERSION = 2
 
     def __init__(self) -> None:
-        self._mfa_token: str | None = None
         self._fingerprint: str | None = None
-        self._email: str | None = None
 
     async def async_step_mfa(
         self, user_input: dict[str, Any] | None = None
@@ -136,9 +131,6 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         errors = {}
         placeholder = ""
-        user_input[MFA_TOKEN] = self._mfa_token
-        user_input[CONF_EMAIL] = self._email
-        user_input[CONF_DEVICE_FINGERPRINT] = self._fingerprint
 
         try:
             info = await validate_mfa_input(self.hass, user_input)
@@ -151,18 +143,42 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             else:
                 # if data is not null and contains MFA TOKEN then initiate MFA capture
                 if CUSTOMER_ID in info["data"]:
-                    users = await async_load_json_object(self.hass, CREDENTIALS)
+                    data = dict(user_input)
+                    fingerprint = user_input[CONF_DEVICE_FINGERPRINT]
 
-                    users[user_input[CONF_DEVICE_FINGERPRINT]
-                          ][CONF_DEVICE_FINGERPRINT] = user_input[CONF_DEVICE_FINGERPRINT]
-                    users[user_input[CONF_DEVICE_FINGERPRINT]
-                          ][CUSTOMER_ID] = info["data"][CUSTOMER_ID]
-                    users[user_input[CONF_DEVICE_FINGERPRINT]
-                          ][TOKEN] = info["data"][TOKEN]
+                    if CUSTOMERS not in data:
+                        data[CUSTOMERS] = dict()
 
-                    save_json(CREDENTIALS, users)
+                    data[CUSTOMERS][self._fingerprint] = {
+                        CONF_DEVICE_FINGERPRINT: fingerprint,
+                        CUSTOMER_ID: info["data"][CUSTOMER_ID],
+                        TOKEN: info["data"][TOKEN],
+                        MFA_TOKEN: user_input[MFA_TOKEN],
+                        CONF_EMAIL: user_input[CONF_EMAIL]
+                    }
+
+                    existing_entries = self.hass.config_entries.async_entries(
+                        DOMAIN)
+
+                    # Check if an entry already exists with the same username
+                    existing_entry = next(
+                        (entry for entry in existing_entries
+                            if entry.data.get(CONF_EMAIL) == user_input[CONF_EMAIL]),
+                        None
+                    )
+
+                    if existing_entry is not None:
+                        # Update specific data in the entry
+                        updated_data = existing_entry.data.copy()
+                        # Merge the import_data into the entry_data
+                        updated_data.update(data)
+                        # Update the entry with the new data
+                        self.hass.config_entries.async_update_entry(
+                            existing_entry,
+                            data=updated_data
+                        )
                     return self.async_create_entry(
-                        title=info["title"], data=users[user_input[CONF_DEVICE_FINGERPRINT]]
+                        title=info["title"], data=data
                     )
 
         return self.async_show_form(
@@ -186,23 +202,41 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         errors = {}
         placeholder = ""
 
-        unique_id = hashlib.md5(
-            user_input[CONF_EMAIL].encode("UTF-8")).hexdigest()
-        self._fingerprint = str(uuid.UUID(hex=unique_id))
-        self._email = user_input[CONF_EMAIL]
+        self._fingerprint = generate_device_fingerprint(user_input[CONF_EMAIL])
 
-        user_input[CONF_DEVICE_FINGERPRINT] = self._fingerprint
+        data = dict(user_input)
 
-        users = await async_load_json_object(self.hass, CREDENTIALS)
-        ryanairData = {
+        if CUSTOMERS not in data:
+            data[CUSTOMERS] = dict()
+
+        data[CUSTOMERS][self._fingerprint] = {
+            CONF_DEVICE_FINGERPRINT: self._fingerprint,
             CONF_EMAIL: user_input[CONF_EMAIL],
-            CONF_PASSWORD: user_input[CONF_PASSWORD],
-            CONF_DEVICE_FINGERPRINT: user_input[CONF_DEVICE_FINGERPRINT],
+            CONF_PASSWORD: user_input[CONF_PASSWORD]
         }
-        users[user_input[CONF_DEVICE_FINGERPRINT]] = ryanairData
-        save_json(CREDENTIALS, users)
+
+        existing_entries = self.hass.config_entries.async_entries(
+            DOMAIN)
+
+        # Check if an entry already exists with the same username
+        existing_entry = next(
+            (entry for entry in existing_entries
+                if entry.data.get(CONF_EMAIL) == user_input[CONF_EMAIL]),
+            None
+        )
+
+        if existing_entry is not None:
+            # Update specific data in the entry
+            updated_data = existing_entry.data.copy()
+            # Merge the import_data into the entry_data
+            updated_data.update(data)
+            # Update the entry with the new data
+            self.hass.config_entries.async_update_entry(
+                existing_entry,
+                data=updated_data
+            )
         try:
-            info = await validate_input(self.hass, user_input)
+            info = await validate_input(self.hass, data, self._fingerprint)
         except CannotConnect:
             errors["base"] = "cannot_connect"
         else:
@@ -214,7 +248,6 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 if info["data"] is not None:
                     # MFA TOKEN initiates MFA code capture
                     if MFA_TOKEN in info["data"]:
-                        self._mfa_token = info["data"][MFA_TOKEN]
                         return self.async_show_form(
                             step_id="mfa",
                             data_schema=STEP_MFA,
@@ -224,18 +257,38 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                             },
                         )
                     if CUSTOMER_ID in info["data"]:
-                        users = await async_load_json_object(self.hass, CREDENTIALS)
 
-                        users[user_input[CONF_DEVICE_FINGERPRINT]
-                              ][CONF_DEVICE_FINGERPRINT] = user_input[CONF_DEVICE_FINGERPRINT]
-                        users[user_input[CONF_DEVICE_FINGERPRINT]
-                              ][CUSTOMER_ID] = info["data"][CUSTOMER_ID]
-                        users[user_input[CONF_DEVICE_FINGERPRINT]
-                              ][TOKEN] = info["data"][TOKEN]
+                        if CUSTOMERS not in data:
+                            data[CUSTOMERS] = dict()
 
-                        save_json(CREDENTIALS, users)
+                        data[CUSTOMERS][self._fingerprint] = {
+                            CONF_DEVICE_FINGERPRINT: self._fingerprint,
+                            CUSTOMER_ID: info["data"][CUSTOMER_ID],
+                            TOKEN: info["data"][TOKEN]
+                        }
+
+                        existing_entries = self.hass.config_entries.async_entries(
+                            DOMAIN)
+
+                        # Check if an entry already exists with the same username
+                        existing_entry = next(
+                            (entry for entry in existing_entries
+                                if entry.data.get(CONF_EMAIL) == user_input[CONF_EMAIL]),
+                            None
+                        )
+
+                        if existing_entry is not None:
+                            # Update specific data in the entry
+                            updated_data = existing_entry.data.copy()
+                            # Merge the import_data into the entry_data
+                            updated_data.update(data)
+                            # Update the entry with the new data
+                            self.hass.config_entries.async_update_entry(
+                                existing_entry,
+                                data=updated_data
+                            )
                         return self.async_create_entry(
-                            title=info["title"], data=users[user_input[CONF_DEVICE_FINGERPRINT]]
+                            title=info["title"], data=data
                         )
 
         return self.async_show_form(
