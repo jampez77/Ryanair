@@ -9,7 +9,9 @@ CUSTOMER_ID = "customerId"
 TOKEN = "token"
 HOST = "https://services-api.ryanair.com/"
 BOARDING_PASS_URL = "https://mntappbp.ryanair.com/v1/boardingpass"
-BOOKING_DETAILS_URL = "https://nativeapps.ryanair.com/booking/rest/en-IE/query/getbookingbybookingid"
+BOOKING_DETAILS_URL = (
+    "https://nativeapps.ryanair.com/booking/rest/en-IE/query/getbookingbybookingid"
+)
 EMAIL = "Email"
 PASSWORD = "password"
 RECORD_LOCATOR = "RecordLocator"

@@ -1,17 +1,17 @@
 """The Ryanair integration."""
+
 from __future__ import annotations
 
-from homeassistant.helpers.typing import ConfigType
-from homeassistant.config_entries import ConfigEntry
-from homeassistant.exceptions import ConfigEntryNotReady
+from homeassistant.config_entries import ConfigEntry, ConfigEntryState
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
-from .const import DOMAIN
+from homeassistant.exceptions import ConfigEntryNotReady
 import homeassistant.helpers.config_validation as cv
-import asyncio
-from homeassistant.config_entries import ConfigEntryState
+from homeassistant.helpers.typing import ConfigType
 
-PLATFORMS = [Platform.SENSOR, Platform.IMAGE]
+from .const import DOMAIN
+
+PLATFORMS = [Platform.IMAGE, Platform.SENSOR]
 CONFIG_SCHEMA = cv.empty_config_schema(DOMAIN)
 
 
@@ -20,19 +20,19 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.data.setdefault(DOMAIN, {})
     hass_data = dict(entry.data)
     # Registers update listener to update config entry when options are updated.
-    unsub_options_update_listener = entry.add_update_listener(
-        options_update_listener)
-    # Store a reference to the unsubscribe function to cleanup if an entry is unloaded.
+    unsub_options_update_listener = entry.add_update_listener(options_update_listener)
+
+    # Do not store the function in entry.data, only in hass.data
     hass_data["unsub_options_update_listener"] = unsub_options_update_listener
+
+    # Store in hass.data, which is not serialized
     hass.data[DOMAIN][entry.entry_id] = hass_data
 
     # Forward the setup to the sensor platform.
     try:
         await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
-    except (asyncio.TimeoutError) as ex:
-        raise ConfigEntryNotReady(
-            f"Timeout while loading config entry for"
-        ) from ex
+    except TimeoutError as ex:
+        raise ConfigEntryNotReady("Timeout while loading config entry for") from ex
     return True
 
 

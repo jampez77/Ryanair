@@ -1,30 +1,32 @@
 """Config flow for Ryanair integration."""
+
 from __future__ import annotations
 
+import hashlib
 from typing import Any
 import uuid
-import hashlib
+
 import voluptuous as vol
-from homeassistant import config_entries
-from homeassistant.core import HomeAssistant
-from homeassistant.data_entry_flow import FlowResult
+
+from homeassistant.config_entries import ConfigFlow, ConfigFlowResult
 from homeassistant.const import CONF_EMAIL, CONF_PASSWORD
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
+
 from .const import (
-    DOMAIN,
-    CONF_DEVICE_FINGERPRINT,
-    TOKEN,
-    CUSTOMER_ID,
+    CODE_MFA_CODE_WRONG,
     CODE_PASSWORD_WRONG,
     CODE_UNKNOWN_DEVICE,
-    MFA_TOKEN,
-    MFA_CODE,
-    CODE_MFA_CODE_WRONG,
+    CONF_DEVICE_FINGERPRINT,
+    CUSTOMER_ID,
     CUSTOMERS,
+    DOMAIN,
+    MFA_CODE,
+    MFA_TOKEN,
+    TOKEN,
 )
-from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from .coordinator import RyanairCoordinator, RyanairMfaCoordinator
 from .errors import CannotConnect
-
 
 STEP_USER_DATA_SCHEMA = vol.Schema(
     {
@@ -40,11 +42,14 @@ STEP_MFA = vol.Schema(
 
 
 def generate_device_fingerprint(email: str) -> str:
+    """Generate Device Fingerprint."""
     unique_id = hashlib.md5(email.encode("UTF-8")).hexdigest()
     return str(uuid.UUID(hex=unique_id))
 
 
-async def validate_input(hass: HomeAssistant, data: dict[str, Any], fingerprint: str) -> dict[str, Any]:
+async def validate_input(
+    hass: HomeAssistant, data: dict[str, Any], fingerprint: str
+) -> dict[str, Any]:
     """Validate the user input allows us to connect."""
     session = async_get_clientsession(hass)
     coordinator = RyanairCoordinator(hass, session, data, fingerprint)
@@ -116,17 +121,18 @@ async def validate_mfa_input(
     return {"title": str(data[CONF_EMAIL]), "data": responseData, "error": err}
 
 
-class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
+class ConfigFlow(ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Ryanair."""
 
     VERSION = 2
 
     def __init__(self) -> None:
+        """Init."""
         self._fingerprint: str | None = None
 
     async def async_step_mfa(
         self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
+    ) -> ConfigFlowResult:
         """Handle the MFA step."""
 
         errors = {}
@@ -140,46 +146,43 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             if info["error"] is not None:
                 errors["base"] = "invalid_auth"
                 placeholder = info["error"]
-            else:
-                # if data is not null and contains MFA TOKEN then initiate MFA capture
-                if CUSTOMER_ID in info["data"]:
-                    data = dict(user_input)
-                    fingerprint = user_input[CONF_DEVICE_FINGERPRINT]
+            elif CUSTOMER_ID in info["data"]:
+                data = dict(user_input)
+                fingerprint = user_input[CONF_DEVICE_FINGERPRINT]
 
-                    if CUSTOMERS not in data:
-                        data[CUSTOMERS] = dict()
+                if CUSTOMERS not in data:
+                    data[CUSTOMERS] = {}
 
-                    data[CUSTOMERS][self._fingerprint] = {
-                        CONF_DEVICE_FINGERPRINT: fingerprint,
-                        CUSTOMER_ID: info["data"][CUSTOMER_ID],
-                        TOKEN: info["data"][TOKEN],
-                        MFA_TOKEN: user_input[MFA_TOKEN],
-                        CONF_EMAIL: user_input[CONF_EMAIL]
-                    }
+                data[CUSTOMERS][self._fingerprint] = {
+                    CONF_DEVICE_FINGERPRINT: fingerprint,
+                    CUSTOMER_ID: info["data"][CUSTOMER_ID],
+                    TOKEN: info["data"][TOKEN],
+                    MFA_TOKEN: user_input[MFA_TOKEN],
+                    CONF_EMAIL: user_input[CONF_EMAIL],
+                }
 
-                    existing_entries = self.hass.config_entries.async_entries(
-                        DOMAIN)
+                existing_entries = self.hass.config_entries.async_entries(DOMAIN)
 
-                    # Check if an entry already exists with the same username
-                    existing_entry = next(
-                        (entry for entry in existing_entries
-                            if entry.data.get(CONF_EMAIL) == user_input[CONF_EMAIL]),
-                        None
+                # Check if an entry already exists with the same username
+                existing_entry = next(
+                    (
+                        entry
+                        for entry in existing_entries
+                        if entry.data.get(CONF_EMAIL) == user_input[CONF_EMAIL]
+                    ),
+                    None,
+                )
+
+                if existing_entry is not None:
+                    # Update specific data in the entry
+                    updated_data = existing_entry.data.copy()
+                    # Merge the import_data into the entry_data
+                    updated_data.update(data)
+                    # Update the entry with the new data
+                    self.hass.config_entries.async_update_entry(
+                        existing_entry, data=updated_data
                     )
-
-                    if existing_entry is not None:
-                        # Update specific data in the entry
-                        updated_data = existing_entry.data.copy()
-                        # Merge the import_data into the entry_data
-                        updated_data.update(data)
-                        # Update the entry with the new data
-                        self.hass.config_entries.async_update_entry(
-                            existing_entry,
-                            data=updated_data
-                        )
-                    return self.async_create_entry(
-                        title=info["title"], data=data
-                    )
+                return self.async_create_entry(title=info["title"], data=data)
 
         return self.async_show_form(
             step_id="mfa",
@@ -190,7 +193,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
+    ) -> ConfigFlowResult:
         """Handle the initial step."""
         if user_input is None:
             return self.async_show_form(
@@ -207,22 +210,24 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         data = dict(user_input)
 
         if CUSTOMERS not in data:
-            data[CUSTOMERS] = dict()
+            data[CUSTOMERS] = {}
 
         data[CUSTOMERS][self._fingerprint] = {
             CONF_DEVICE_FINGERPRINT: self._fingerprint,
             CONF_EMAIL: user_input[CONF_EMAIL],
-            CONF_PASSWORD: user_input[CONF_PASSWORD]
+            CONF_PASSWORD: user_input[CONF_PASSWORD],
         }
 
-        existing_entries = self.hass.config_entries.async_entries(
-            DOMAIN)
+        existing_entries = self.hass.config_entries.async_entries(DOMAIN)
 
         # Check if an entry already exists with the same username
         existing_entry = next(
-            (entry for entry in existing_entries
-                if entry.data.get(CONF_EMAIL) == user_input[CONF_EMAIL]),
-            None
+            (
+                entry
+                for entry in existing_entries
+                if entry.data.get(CONF_EMAIL) == user_input[CONF_EMAIL]
+            ),
+            None,
         )
 
         if existing_entry is not None:
@@ -232,8 +237,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             updated_data.update(data)
             # Update the entry with the new data
             self.hass.config_entries.async_update_entry(
-                existing_entry,
-                data=updated_data
+                existing_entry, data=updated_data
             )
         try:
             info = await validate_input(self.hass, data, self._fingerprint)
@@ -243,53 +247,49 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             if info["error"] is not None:
                 errors["base"] = "invalid_auth"
                 placeholder = info["error"]
-            else:
-                # if data is not null and contains MFA TOKEN then initiate MFA capture
-                if info["data"] is not None:
-                    # MFA TOKEN initiates MFA code capture
-                    if MFA_TOKEN in info["data"]:
-                        return self.async_show_form(
-                            step_id="mfa",
-                            data_schema=STEP_MFA,
-                            description_placeholders={
-                                "email": "Please enter the 8 character verification code sent to "
-                                + info["title"]
-                            },
+            elif info["data"] is not None:
+                # MFA TOKEN initiates MFA code capture
+                if MFA_TOKEN in info["data"]:
+                    return self.async_show_form(
+                        step_id="mfa",
+                        data_schema=STEP_MFA,
+                        description_placeholders={
+                            "email": "Please enter the 8 character verification code sent to "
+                            + info["title"]
+                        },
+                    )
+                if CUSTOMER_ID in info["data"]:
+                    if CUSTOMERS not in data:
+                        data[CUSTOMERS] = {}
+
+                    data[CUSTOMERS][self._fingerprint] = {
+                        CONF_DEVICE_FINGERPRINT: self._fingerprint,
+                        CUSTOMER_ID: info["data"][CUSTOMER_ID],
+                        TOKEN: info["data"][TOKEN],
+                    }
+
+                    existing_entries = self.hass.config_entries.async_entries(DOMAIN)
+
+                    # Check if an entry already exists with the same username
+                    existing_entry = next(
+                        (
+                            entry
+                            for entry in existing_entries
+                            if entry.data.get(CONF_EMAIL) == user_input[CONF_EMAIL]
+                        ),
+                        None,
+                    )
+
+                    if existing_entry is not None:
+                        # Update specific data in the entry
+                        updated_data = existing_entry.data.copy()
+                        # Merge the import_data into the entry_data
+                        updated_data.update(data)
+                        # Update the entry with the new data
+                        self.hass.config_entries.async_update_entry(
+                            existing_entry, data=updated_data
                         )
-                    if CUSTOMER_ID in info["data"]:
-
-                        if CUSTOMERS not in data:
-                            data[CUSTOMERS] = dict()
-
-                        data[CUSTOMERS][self._fingerprint] = {
-                            CONF_DEVICE_FINGERPRINT: self._fingerprint,
-                            CUSTOMER_ID: info["data"][CUSTOMER_ID],
-                            TOKEN: info["data"][TOKEN]
-                        }
-
-                        existing_entries = self.hass.config_entries.async_entries(
-                            DOMAIN)
-
-                        # Check if an entry already exists with the same username
-                        existing_entry = next(
-                            (entry for entry in existing_entries
-                                if entry.data.get(CONF_EMAIL) == user_input[CONF_EMAIL]),
-                            None
-                        )
-
-                        if existing_entry is not None:
-                            # Update specific data in the entry
-                            updated_data = existing_entry.data.copy()
-                            # Merge the import_data into the entry_data
-                            updated_data.update(data)
-                            # Update the entry with the new data
-                            self.hass.config_entries.async_update_entry(
-                                existing_entry,
-                                data=updated_data
-                            )
-                        return self.async_create_entry(
-                            title=info["title"], data=data
-                        )
+                    return self.async_create_entry(title=info["title"], data=data)
 
         return self.async_show_form(
             step_id="user",
