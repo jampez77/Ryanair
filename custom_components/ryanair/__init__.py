@@ -19,13 +19,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up platform from a ConfigEntry."""
     hass.data.setdefault(DOMAIN, {})
     hass_data = dict(entry.data)
+
     # Registers update listener to update config entry when options are updated.
     unsub_options_update_listener = entry.add_update_listener(options_update_listener)
 
-    # Do not store the function in entry.data, only in hass.data
-    hass_data["unsub_options_update_listener"] = unsub_options_update_listener
+    # Use async_on_unload to register the listener without storing it in entry data
+    entry.async_on_unload(unsub_options_update_listener)
 
-    # Store in hass.data, which is not serialized
+    # Store other necessary data in hass.data, without the listener function
     hass.data[DOMAIN][entry.entry_id] = hass_data
 
     # Forward the setup to the sensor platform.
@@ -45,8 +46,6 @@ async def options_update_listener(hass: HomeAssistant, config_entry: ConfigEntry
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
-    # Remove options_update_listener.
-    hass.data[DOMAIN][entry.entry_id]["unsub_options_update_listener"]()
 
     # Remove config entry from domain.
     if unload_ok:
