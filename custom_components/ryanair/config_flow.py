@@ -129,6 +129,8 @@ class ConfigFlow(ConfigFlow, domain=DOMAIN):
     def __init__(self) -> None:
         """Init."""
         self._fingerprint: str | None = None
+        self._mfa_data: dict[str, Any] | None = None
+        self._mfa_token: str | None = None
 
     async def async_step_mfa(
         self, user_input: dict[str, Any] | None = None
@@ -139,7 +141,13 @@ class ConfigFlow(ConfigFlow, domain=DOMAIN):
         placeholder = ""
 
         try:
-            info = await validate_mfa_input(self.hass, user_input)
+            assert self._mfa_data is not None
+            assert self._mfa_token is not None
+            assert self._fingerprint is not None
+            mfa_data = {**self._mfa_data, **user_input}
+            mfa_data[MFA_TOKEN] = self._mfa_token
+            mfa_data[CONF_DEVICE_FINGERPRINT] = self._fingerprint
+            info = await validate_mfa_input(self.hass, mfa_data)
         except CannotConnect:
             errors["base"] = "cannot_connect"
         else:
@@ -147,8 +155,8 @@ class ConfigFlow(ConfigFlow, domain=DOMAIN):
                 errors["base"] = "invalid_auth"
                 placeholder = info["error"]
             elif CUSTOMER_ID in info["data"]:
-                data = dict(user_input)
-                fingerprint = user_input[CONF_DEVICE_FINGERPRINT]
+                data = dict(self._mfa_data)
+                fingerprint = self._fingerprint
 
                 if CUSTOMERS not in data:
                     data[CUSTOMERS] = {}
@@ -157,8 +165,8 @@ class ConfigFlow(ConfigFlow, domain=DOMAIN):
                     CONF_DEVICE_FINGERPRINT: fingerprint,
                     CUSTOMER_ID: info["data"][CUSTOMER_ID],
                     TOKEN: info["data"][TOKEN],
-                    MFA_TOKEN: user_input[MFA_TOKEN],
-                    CONF_EMAIL: user_input[CONF_EMAIL],
+                    MFA_TOKEN: self._mfa_token,
+                    CONF_EMAIL: data[CONF_EMAIL],
                 }
 
                 existing_entries = self.hass.config_entries.async_entries(DOMAIN)
@@ -250,6 +258,8 @@ class ConfigFlow(ConfigFlow, domain=DOMAIN):
             elif info["data"] is not None:
                 # MFA TOKEN initiates MFA code capture
                 if MFA_TOKEN in info["data"]:
+                    self._mfa_data = data
+                    self._mfa_token = info["data"][MFA_TOKEN]
                     return self.async_show_form(
                         step_id="mfa",
                         data_schema=STEP_MFA,
