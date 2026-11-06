@@ -480,18 +480,27 @@ class RyanairProfileCoordinator(DataUpdateCoordinator):
         """Fetch data from API endpoint."""
 
         try:
-            if self.data is not None and CONF_DEVICE_FINGERPRINT in self.data:
-                if X_REMEMBER_ME_TOKEN not in self.data:
-                    self.data = await rememberMeToken(self, self.data, self.fingerprint)
+            if (
+                self.data is not None
+                and CUSTOMERS in self.data
+                and self.fingerprint in self.data[CUSTOMERS]
+            ):
+                customer_data = self.data[CUSTOMERS][self.fingerprint]
+                if X_REMEMBER_ME_TOKEN not in customer_data:
+                    self.data = await rememberMeToken(
+                        self, self.data, self.fingerprint
+                    )
+                    customer_data = self.data[CUSTOMERS][self.fingerprint]
 
-                body = await getUserProfile(self, self.data)
+                body = await getUserProfile(self, customer_data)
 
                 if (ACCESS_DENIED in body and body[CAUSE] == NOT_AUTHENTICATED) or (
                     TYPE in body and body[TYPE] == CLIENT_ERROR
                 ):
                     self.data = await refreshToken(self, self.data, self.fingerprint)
+                    customer_data = self.data[CUSTOMERS][self.fingerprint]
 
-                    body = await getUserProfile(self, self.data)
+                    body = await getUserProfile(self, customer_data)
 
                 return body
 
